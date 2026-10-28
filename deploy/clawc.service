@@ -1,0 +1,22 @@
+[Unit]
+Description=clawc - claw-style agent daemon (telegram + serve + heartbeat)
+Documentation=https://github.com/ (see README.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# One config file drives every gateway. Create it with: clawc setup
+Environment=CLAWC_CONFIG=/etc/clawc/config
+ExecStart=/usr/local/bin/clawc daemon
+Restart=always
+RestartSec=5
+# The supervisor already restarts individual gateways; Restart= covers the
+# whole process tree (use SIGTERM for clean shutdown - clawc reaps its children).
+
+# Hardening (relax if the agent needs broader access to the system)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
