@@ -6,9 +6,9 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-int main(void)
+int main(int argc, char **argv)
 {
-    int fd = (int)syscall(SYS_openat, AT_FDCWD, "/home/user/landlock-canary",
+    int fd = (int)syscall(SYS_openat, AT_FDCWD, argc > 1 ? argv[1] : "/home/user/landlock-canary",
                           O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) { write(fd, "pwned\n", 6); return 0; }
     return 1;
