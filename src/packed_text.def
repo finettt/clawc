@@ -1,0 +1,280 @@
+/* Text strings remain readable here; regenerate packed_text_data.h with tools/textpack.c. */
+TEXT(TXT_000,
+"You are clawc, a claw-style agent.\n\n"
+        "# Rules\n"
+        "- Prefer tools over guessing; verify when unsure.\n"
+        "- Improve yourself: write_skill = procedure; reflect = lesson.\n"
+        "- Never expose secrets found on the system unless asked.\n"
+        "- Keep replies short and concrete.\n"
+        "- When done, reply with the final answer and no further tool calls.\n"
+        "- Work autonomously: goal_add/goal_done manage GOALS.md.\n")
+TEXT(TXT_001,
+"- HEARTBEAT: waking on a timer; check the checklist below. "
+            "Nothing to do? Reply exactly: HEARTBEAT_OK.\n")
+TEXT(TXT_002,
+"error: subagents cannot nest")
+TEXT(TXT_003,
+"error: subagent needs a \"task\" or \"tasks\" list")
+TEXT(TXT_004,
+"[agent stopped: max tool steps reached]")
+TEXT(TXT_005,
+"error: malformed JSON arguments - re-issue "
+                                  "this tool call with a valid JSON object")
+TEXT(TXT_006,
+"refused: needs confirmation and was not "
+                                      "approved. Do not retry; ask the user.")
+TEXT(TXT_007,
+"error: tool not available to this subagent")
+TEXT(TXT_008,
+"[agent error] session storage failed")
+TEXT(TXT_009,
+"HEARTBEAT cycle. Review this checklist and act on anything actionable.\n"
+        "If nothing needs action, reply exactly: HEARTBEAT_OK\n\n")
+TEXT(TXT_010,
+"(no goals yet - /goal add <task>)")
+TEXT(TXT_011,
+"usage: /goal | /goal add <task> | /goal done <id> | /goal rm <id>")
+TEXT(TXT_012,
+"{\n  \"_note\": \"written by clawc setup\",\n  \"workspace\": ")
+TEXT(TXT_013,
+",\n  \"api_url\": ")
+TEXT(TXT_014,
+",\n  \"api_key\": ")
+TEXT(TXT_015,
+",\n  \"telegram_token\": ")
+TEXT(TXT_016,
+",\n  \"telegram_allow\": ")
+TEXT(TXT_017,
+",\n  \"telegram_users\": ")
+TEXT(TXT_018,
+",\n  \"auto_approve\": true")
+TEXT(TXT_019,
+"Return only JSON: {\"report\":\"your visible response\",\"messages\":[{\"to\":\"@agent or #group\",\"text\":\"message\"}]}. Send no messages if finished.")
+TEXT(TXT_020,
+"Available agents:")
+TEXT(TXT_021,
+"{\"type\":\"object\",\"properties\":{")
+TEXT(TXT_022,
+",\"description\":")
+TEXT(TXT_023,
+"error: missing 'command'")
+TEXT(TXT_024,
+"error: missing 'path'")
+TEXT(TXT_025,
+"error: path not allowed or not found")
+TEXT(TXT_026,
+"error: cannot read file")
+TEXT(TXT_027,
+"(empty or past end)")
+TEXT(TXT_028,
+"error: need 'path' and 'content'")
+TEXT(TXT_029,
+"error: path not allowed")
+TEXT(TXT_030,
+"error: cannot open directory")
+TEXT(TXT_031,
+"error: missing 'lesson'")
+TEXT(TXT_032,
+"error: LESSONS.md is full - consolidate the lessons "
+                          "with write_file into a tighter set first")
+TEXT(TXT_033,
+"error: cannot write LESSONS.md")
+TEXT(TXT_034,
+"error: write_skill needs name, description and content")
+TEXT(TXT_035,
+"error: invalid skill name")
+TEXT(TXT_036,
+"error: invalid skill name (use lowercase letters, digits, - or _)")
+TEXT(TXT_037,
+"error: skill content too long (max 8KB)")
+TEXT(TXT_038,
+"error: cannot write skill file")
+TEXT(TXT_039,
+"error: a2a needs peer and task")
+TEXT(TXT_040,
+"error: a2a needs bridge_token (64 hex characters)")
+TEXT(TXT_041,
+"error: peer TLS verification or handshake failed")
+TEXT(TXT_042,
+"error: peer write failed")
+TEXT(TXT_043,
+"error: peer authentication failed")
+TEXT(TXT_044,
+"error: peer sent an unreadable reply")
+TEXT(TXT_045,
+"error: missing task")
+TEXT(TXT_046,
+"error: cannot write GOALS.md")
+TEXT(TXT_047,
+"error: missing id")
+TEXT(TXT_048,
+"error: no GOALS.md")
+TEXT(TXT_049,
+"error: missing 'fact'")
+TEXT(TXT_050,
+"error: cannot write MEMORY.md")
+TEXT(TXT_051,
+"error: missing 'query'")
+TEXT(TXT_052,
+"error: missing 'name'")
+TEXT(TXT_053,
+"\n(refine this skill with write_skill if you find a better "
+                     "approach while using it)")
+TEXT(TXT_054,
+"error: missing 'url'")
+TEXT(TXT_055,
+"error: url must start with http:// or https://")
+TEXT(TXT_056,
+"\n[... truncated]")
+TEXT(TXT_057,
+",\"tool_call_id\":")
+TEXT(TXT_058,
+",\"tool_calls\":[")
+TEXT(TXT_059,
+",\"type\":\"function\",\"function\":{\"name\":")
+TEXT(TXT_060,
+",\"content\":[{\"type\":\"text\",\"text\":")
+TEXT(TXT_061,
+"{\"role\":\"user\",\"content\":[")
+TEXT(TXT_062,
+"{\"type\":\"tool_result\",\"tool_use_id\":")
+TEXT(TXT_063,
+"{\"role\":\"assistant\",\"content\":[")
+TEXT(TXT_064,
+"{\"type\":\"text\",\"text\":")
+TEXT(TXT_065,
+"{\"type\":\"tool_use\",\"id\":")
+TEXT(TXT_066,
+"Accept: application/json, text/plain, */*\r\n")
+TEXT(TXT_067,
+"Content-Type: application/json\r\n")
+TEXT(TXT_068,
+"Connection: close\r\n")
+
+#include "tool_rows.h"
+#define ROW(id,a,b,c) b "\0" c "\0"
+TEXT(TXT_TOOL_DATA, TOOL_ROWS(ROW))
+#undef ROW
+
+TEXT(TXT_EXTRA_00,
+"# Soul\n\n"
+        "You are my personal agent: calm, precise, proactive.\n\n"
+        "## What you do\n"
+        "- Handle tasks I message: files, shell, research, reminders.\n"
+        "- Work the HEARTBEAT.md checklist on timer.\n"
+        "- Remember key facts about my preferences and projects.\n\n"
+        "## What you never do\n"
+        "- Delete data or message third parties without confirmation.\n"
+        "- Run destructive commands without asking.\n")
+TEXT(TXT_EXTRA_01,
+"# Lessons\n\nDurable lessons recorded via reflect.\n")
+TEXT(TXT_EXTRA_02,
+"# Goals\n\nAutonomous tasks; the agent works these on its own:\n"
+        "use goal_add / goal_done, or edit directly.\n")
+TEXT(TXT_EXTRA_03,
+"# Heartbeat checklist\n\n"
+        "- [ ] Nothing scheduled yet. Edit this file to add periodic duties.\n"
+        "      Example: \"Check ~/inbox for unread notes.\"\n")
+TEXT(TXT_EXTRA_04,
+"# example - demo skill\n\n"
+        "When asked to demo a skill, reply: \"Skills load from workspace/skills/<name>/SKILL.md\".\n")
+TEXT(TXT_EXTRA_05,
+"Autonomous work cycle: advance the top GOALS.md goal now; goal_done "
+        "when finished. No goals? Reply exactly: NO_GOALS.")
+TEXT(TXT_EXTRA_06,
+"Self-improvement review. reflect: new lessons (not in LESSONS.md); "
+        "write_skill: reusable procedures. End with one line on changes.")
+TEXT(TXT_EXTRA_07,
+"clawc: no HEARTBEAT.md in workspace (run: clawc init)\n")
+TEXT(TXT_EXTRA_08,
+"clawc: bad time spec (want HH:MM, or DAY HH:MM for --weekly)\n")
+TEXT(TXT_EXTRA_09,
+"usage: clawc cron list|add TASK [--in N|--at T] "
+                        "[--every N]|rm ID|--run-due\n")
+TEXT(TXT_EXTRA_10,
+"clawc: daemon: no gateways configured.\n"
+            "  set telegram_token / serve_port / heartbeat_interval in the config file,\n"
+            "  or add a cron.json in the workspace (cron gateway),\n"
+            "  environment (CLAWC_TELEGRAM_TOKEN, CLAWC_SERVE_PORT,\n"
+            "  CLAWC_HEARTBEAT_INTERVAL), or flags (-token, -p, -i).\n"
+            "  See effective settings with: clawc config\n")
+
+
+TEXT(TXT_EXTRA_13,
+"[sandbox] no OS sandbox backend - clawc jail "
+                            "active (best effort; not secure containment)\n")
+
+
+TEXT(TXT_USAGE_HEAD,
+    "clawc " CLAWC_VERSION " - C agent\n"
+    "usage: clawc [options] <command> [args]\n"
+    "commands: init setup run chat daemon")
+TEXT(TXT_USAGE_TAIL,
+    " doctor improve swarm\n"
+    "          autonomous cron config fetch version help\n"
+    "options: -c FILE -w DIR -m MODEL -u URL -k KEY -a KIND -s STEPS\n"
+    "         -t SECS -x DIR -q --yes --insecure\n"
+    "config: JSON; env = CLAWC_+UPPER(key).\n")
+
+TEXT(TXT_SUMMARY,
+"Compress this conversation for continuity: "
+        "facts, preferences, decisions, open tasks, paths.")
+
+TEXT(TXT_STDOUT_00,
+"commands: /status /memory /model /reset /quit\n"
+                   "everything else is a message to the agent.\n")
+
+TEXT(TXT_STDOUT_01,
+"  [sandbox]   --  no OS sandbox on this platform; "
+               "clawc jail is the fallback for \"sandbox\": \"os\"\n")
+
+TEXT(TXT_STDOUT_02,
+"no cron jobs (add one: clawc cron add \"task\" --in 3600)\n")
+
+TEXT(TXT_STDOUT_03,
+"\nnext steps:\n"
+           "  clawc chat      # talk to the agent here\n"
+           "  clawc daemon    # run all configured gateways (telegram/serve/heartbeat)\n"
+           "  clawc config    # review these settings any time\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+TEXT(TXT_TG_START,
+"clawc agent online - local-first claw-style agent.\n\n"
+    "Commands: /goal (list/add/done/rm) manages your autonomous goals.\n"
+    "Commands:\n"
+    "/status - what I am and how I am configured\n"
+    "/memory - show what I remember\n"
+    "/model  - current model\n"
+    "/reset  - clear this chat's history\n"
+    "/help   - this message\n\n"
+    "Dangerous actions ask for confirmation (/yes or /no).")
