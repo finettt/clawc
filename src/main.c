@@ -1,7 +1,9 @@
 /* clawc - main.c: CLI, config resolution, chat, heartbeat, daemon supervisor,
    TCP bridge server. */
 #define _XOPEN_SOURCE 700
+#include "packed_text.h"
 #include "agent.h"
+#include "swarm.h"
 #include "config.h"
 #include "cron.h"
 #include "jail.h"
@@ -20,6 +22,8 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <netdb.h>
 #include <poll.h>
 #include <signal.h>
@@ -27,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -38,7 +43,7 @@ typedef struct {
     TgCfg tg;
     int serve_port;    /* -1 = unset: serve verb defaults to 8848; daemon: off */
     const char *serve_cert, *serve_key;
-    int serve_tls;
+    int serve_tls, serve_workers;
     const char *serve_bind; /* NULL = loopback only (127.0.0.1); "0.0.0.0" = exposed */
     int hb_interval;   /* -1 = unset: daemon heartbeat gateway off */
     int au_interval;   /* -1 = unset: daemon autonomous gateway off */
@@ -58,18 +63,11 @@ static void on_status_stderr(void *user, const char *phase);
 static void on_delta_stdout(void *user, const char *text, size_t n);
 
 static void usage(FILE *f) {
-    fprintf(f,
-        "clawc " CLAWC_VERSION " - C agent\n"
-        "usage: clawc [options] <command> [args]\n"
-        "commands: init setup run chat daemon"
+    fputs(packed_text(TXT_USAGE_HEAD), f);
 #ifndef CLAWC_NO_TELEGRAM
-        " telegram"
+    fputs(" telegram", f);
 #endif
-        " doctor improve\n"
-        "          autonomous cron config fetch version help\n"
-        "options: -c FILE -w DIR -m MODEL -u URL -k KEY -a KIND -s STEPS\n"
-        "         -t SECS -x DIR -q --yes --insecure\n"
-        "config: JSON; env = CLAWC_+UPPER(key).\n");
+    fputs(packed_text(TXT_USAGE_TAIL), f);
 }
 
 static char *default_workspace(void) {
@@ -82,10 +80,11 @@ static char *default_workspace(void) {
     return b.s;
 }
 
-static void write_if_missing(const char *path, const char *content) {
-    if (file_exists(path)) return;
-    if (write_file(path, content) != 0)
+static void ws_write_if_missing(const char *ws, const char *name, const char *content) {
+    char *path = path_join(ws, name);
+    if (!file_exists(path) && write_file(path, content) != 0)
         fprintf(stderr, "clawc: cannot write %s\n", path);
+    free(path);
 }
 
 static void cmd_init(const char *ws) {
@@ -98,46 +97,22 @@ static void cmd_init(const char *ws) {
         mkdir(sk, 0755);
         free(sk);
     }
-    char *p = path_join(ws, "SOUL.md");
-    write_if_missing(p,
-        "# Soul\n\n"
-        "You are my personal agent: calm, precise, proactive.\n\n"
-        "## What you do\n"
-        "- Handle tasks I message: files, shell, research, reminders.\n"
-        "- Work the HEARTBEAT.md checklist on timer.\n"
-        "- Remember key facts about my preferences and projects.\n\n"
-        "## What you never do\n"
-        "- Delete data or message third parties without confirmation.\n"
-        "- Run destructive commands without asking.\n");
-    free(p);
-    p = path_join(ws, "MEMORY.md");
-    write_if_missing(p, "# Memory\n");
-    free(p);
-    p = path_join(ws, "LESSONS.md");
-    write_if_missing(p,
-        "# Lessons\n\nDurable lessons recorded via reflect.\n");
-    free(p);
-    p = path_join(ws, "GOALS.md");
-    write_if_missing(p,
-        "# Goals\n\nAutonomous tasks; the agent works these on its own:\n"
-        "use goal_add / goal_done, or edit directly.\n");
-    free(p);
-    p = path_join(ws, "HEARTBEAT.md");
-    write_if_missing(p,
-        "# Heartbeat checklist\n\n"
-        "- [ ] Nothing scheduled yet. Edit this file to add periodic duties.\n"
-        "      Example: \"Check ~/inbox for unread notes.\"\n");
-    free(p);
-    p = path_join(ws, "skills");
+    ws_write_if_missing(ws, "SOUL.md",
+        packed_text(TXT_EXTRA_00));
+    ws_write_if_missing(ws, "MEMORY.md", "# Memory\n");
+    ws_write_if_missing(ws, "LESSONS.md",
+        packed_text(TXT_EXTRA_01));
+    ws_write_if_missing(ws, "GOALS.md",
+        packed_text(TXT_EXTRA_02));
+    ws_write_if_missing(ws, "HEARTBEAT.md",
+        packed_text(TXT_EXTRA_03));
+    char *p = path_join(ws, "skills");
     char *sk = path_join(p, "example");
     mkdir(sk, 0755);
     free(sk);
     free(p);
-    p = path_join(ws, "skills/example/SKILL.md");
-    write_if_missing(p,
-        "# example - demo skill\n\n"
-        "When asked to demo a skill, reply: \"Skills load from workspace/skills/<name>/SKILL.md\".\n");
-    free(p);
+    ws_write_if_missing(ws, "skills/example/SKILL.md",
+        packed_text(TXT_EXTRA_04));
     printf("workspace ready: %s\n", ws);
 }
 
@@ -174,14 +149,13 @@ static int cmd_heartbeat(App *app) {
     char *hb = read_file(p);
     free(p);
     if (!hb) {
-        fprintf(stderr, "clawc: no HEARTBEAT.md in workspace (run: clawc init)\n");
+        fputs(packed_text(TXT_EXTRA_07), stderr);
         return 1;
     }
     Buf prompt;
     buf_init(&prompt);
     buf_puts(&prompt,
-        "HEARTBEAT cycle. Review this checklist and act on anything actionable.\n"
-        "If nothing needs action, reply exactly: HEARTBEAT_OK\n\n");
+        packed_text(TXT_009));
     buf_puts(&prompt, hb);
     free(hb);
 
@@ -312,13 +286,11 @@ static int cmd_chat(App *app, int yes_auto) {
         if (!t[0]) continue;
         if (str_eq(t, "/quit") || str_eq(t, "/exit")) break;
         if (str_eq(t, "/reset")) {
-            agent_clear_session(&app->agent);
-            printf("(history cleared)\n");
+            puts(agent_clear_session(&app->agent) ? "(history storage failed)" : "(history cleared)");
             continue;
         }
         if (str_starts(t, "/help") || str_starts(t, "/start")) {
-            printf("commands: /status /memory /model /reset /quit\n"
-                   "everything else is a message to the agent.\n");
+            fputs(packed_text(TXT_STDOUT_00), stdout);
             continue;
         }
         if (str_starts(t, "/status")) { print_cmd_status(app); continue; }
@@ -332,7 +304,7 @@ static int cmd_chat(App *app, int yes_auto) {
                 char *g = read_file(gp);
                 free(gp);
                 if (g && g[0]) buf_printf(&out, "%.1400s", g);
-                else buf_puts(&out, "(no goals yet - /goal add <task>)");
+                else buf_puts(&out, packed_text(TXT_010));
                 free(g);
             } else if (str_starts(p, "add "))
                 goal_add_text(&app->agent.tools, p + 4, NULL, NULL, &out);
@@ -341,7 +313,7 @@ static int cmd_chat(App *app, int yes_auto) {
             else if (str_starts(p, "rm "))
                 goal_rm_text(&app->agent.tools, p + 3, &out);
             else
-                buf_puts(&out, "usage: /goal | /goal add <task> | /goal done <id> | /goal rm <id>");
+                buf_puts(&out, packed_text(TXT_011));
             printf("%s\n", out.s);
             buf_free(&out);
             continue;
@@ -366,51 +338,84 @@ static int cmd_chat(App *app, int yes_auto) {
     return 0;
 }
 
-/* per-"from" sessions for the serve bridge */
-typedef struct {
-    char name[33];
-    Agent agent;
-    int used;
-} SvSession;
-
 #ifndef CLAWC_NO_SERVE
-static SvSession sv_sessions[32];
-
-static Agent *serve_session(App *app, const char *from) {
-    char name[33];
-    int k = 0;
-    for (; from && *from && k < 32; from++) {
-        char c = *from;
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_')
-            name[k++] = c;
+/* Identity is exact: rejecting ambiguous spellings avoids session collisions.
+   Missing/empty identity keeps the existing shared default session. */
+static int serve_name(const char *from, char name[33]) {
+    size_t n = 0;
+    if (!from || !*from) from = "default";
+    for (; from[n]; n++) {
+        char c = from[n];
+        if (n >= 32 || !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                         (c >= '0' && c <= '9') || c == '-' || c == '_')) return -1;
+        name[n] = c;
     }
-    name[k] = 0;
-    if (!k) snprintf(name, sizeof name, "default");
-
-    int i, free_slot = -1;
-    for (i = 0; i < 32; i++) {
-        if (sv_sessions[i].used && str_eq(sv_sessions[i].name, name))
-            return &sv_sessions[i].agent;
-        if (!sv_sessions[i].used && free_slot < 0) free_slot = i;
-    }
-    if (free_slot < 0) free_slot = 0; /* reuse slot 0 */
-    SvSession *s = &sv_sessions[free_slot];
-    if (s->used) agent_free(&s->agent);
-    s->used = 1;
-    snprintf(s->name, sizeof s->name, "%s", name);
-    agent_init(&s->agent);
-    s->agent.llm = app->agent.llm;
-    s->agent.tools = app->agent.tools;
-    s->agent.max_steps = app->agent.max_steps;
-    s->agent.auto_approve = 1; /* machine bridge: audit-logged, no interactive prompt */
-    Buf p;
-    buf_init(&p);
-    buf_printf(&p, "%s/history/srv-%s.jsonl", app->agent.tools.workspace, name);
-    agent_open_session(&s->agent, p.s);
-    buf_free(&p);
-    return &s->agent;
+    name[n] = 0;
+    return 0;
 }
+/* Locks have separate files so opening/closing the history cannot release them.
+   Busy same-identity requests get an explicit error rather than tying up all
+   workers; clients can retry.  No process-global session cache is needed. */
+typedef struct { Agent agent; int lock, tempfd; char *path, *temp; } ServeSession;
+static void serve_session_close(ServeSession *s) {
+    if (s->tempfd >= 0) close(s->tempfd);
+    if (s->temp) unlink(s->temp);
+    if (s->lock >= 0) close(s->lock);
+    free(s->temp); free(s->path);
+}
+static int serve_session(App *app, const char *from, ServeSession *session) {
+    char name[33];
+    memset(session, 0, sizeof *session); session->lock = session->tempfd = -1;
+    if (serve_name(from, name) != 0) return -2;
+    Buf path, lock, tmp; buf_init(&path); buf_init(&lock); buf_init(&tmp);
+    buf_printf(&path, "%s/history", app->agent.tools.workspace);
+    if (mkdir(path.s, 0700) != 0 && errno != EEXIST) goto failed;
+    buf_printf(&tmp, "%s/.srv-tmp-XXXXXX", path.s);
+    buf_printf(&path, "/srv-%s.jsonl", name);
+    buf_printf(&lock, "%s.lock", path.s);
+    session->lock = open(lock.s, O_CREAT | O_RDWR | O_NOFOLLOW | O_NONBLOCK, 0600);
+    if (session->lock < 0) goto failed;
+    struct stat st;
+    if (fcntl(session->lock, F_SETFD, FD_CLOEXEC) < 0 || fstat(session->lock, &st) < 0 || !S_ISREG(st.st_mode)) goto failed;
+    struct flock fl; memset(&fl, 0, sizeof fl); fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET;
+    if (fcntl(session->lock, F_SETLK, &fl) < 0) {
+        int e = errno; buf_free(&path); buf_free(&lock); buf_free(&tmp); serve_session_close(session);
+        return e == EACCES || e == EAGAIN ? -4 : -3;
+    }
+    int history = open(path.s, O_CREAT | O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0600);
+    if (history < 0) goto failed;
+    if (fstat(history, &st) < 0 || !S_ISREG(st.st_mode)) { close(history); goto failed; }
+    session->tempfd = mkstemp(tmp.s);
+    if (session->tempfd < 0) { close(history); goto failed; }
+    session->path = xstrdup(path.s); session->temp = xstrdup(tmp.s);
+    if (fcntl(session->tempfd, F_SETFD, FD_CLOEXEC) < 0) { close(history); goto failed; }
+    char block[4096]; ssize_t n; int copy_ok = 1;
+    while ((n = read(history, block, sizeof block)) != 0) {
+        if (n < 0) { if (errno == EINTR) continue; copy_ok = 0; break; }
+        if (memchr(block, 0, (size_t)n)) { copy_ok = 0; break; }
+        ssize_t pos = 0;
+        while (pos < n) { ssize_t w = write(session->tempfd, block + pos, (size_t)(n - pos));
+            if (w < 0 && errno == EINTR) continue;
+            if (w <= 0) { copy_ok = 0; break; }
+            pos += w;
+        }
+        if (!copy_ok) break;
+    }
+    close(history);
+    if (!copy_ok) goto failed;
+    agent_init(&session->agent); session->agent.llm = app->agent.llm; session->agent.tools = app->agent.tools;
+    session->agent.max_steps = app->agent.max_steps; session->agent.auto_approve = 1;
+    agent_open_session(&session->agent, session->temp);
+    free(session->agent.session_name);
+    session->agent.session_name = xmalloc(strlen(name) + 5);
+    sprintf(session->agent.session_name, "srv-%s", name);
+    buf_free(&path); buf_free(&lock); buf_free(&tmp);
+    return 0;
+failed:
+    buf_free(&path); buf_free(&lock); buf_free(&tmp); serve_session_close(session); return -3;
+}
+static volatile sig_atomic_t serve_stop;
+static void serve_stop_handler(int sig) { (void)sig; serve_stop = 1; }
 
 /* Tokens are 64 hex characters (generate using: openssl rand -hex 32). */
 static int bridge_valid(const char *s) {
@@ -430,10 +435,84 @@ static int bridge_match(const char *a, const char *b) {
     return diff == 0;
 }
 
+static void serve_client(App *app, BridgeTlsCtx *tlsctx, int c) {
+        BridgeTls *conn = app->serve_tls ? bridge_tls_accept(tlsctx, c, 5) : NULL;
+        if (app->serve_tls && !conn) { close(c); return; }
+        Buf line;
+        buf_init(&line);
+        char ch;
+        int complete = 0;
+        struct timespec start, now;
+        if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+            bridge_tls_free(conn); close(c); buf_free(&line); return;
+        }
+        for (;;) {
+            struct pollfd pfd = { c, POLLIN, 0 };
+            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) break;
+            long long elapsed = (now.tv_sec - start.tv_sec) * 1000LL +
+                                (now.tv_nsec - start.tv_nsec) / 1000000LL;
+            if (elapsed >= 5000) break; /* absolute deadline, even for trickle input */
+            if (conn) {
+                if (bridge_tls_read(conn, &ch, 1, (int)((5999 - elapsed) / 1000)) != 1) break;
+            } else {
+                int ready = poll(&pfd, 1, (int)(5000 - elapsed));
+                if (ready < 0 && errno == EINTR) continue;
+                if (ready <= 0 || recv(c, &ch, 1, 0) != 1) break;
+            }
+            if (ch == '\n') { complete = 1; break; }
+            if (line.len >= 1024 * 1024) break;
+            buf_add(&line, &ch, 1);
+        }
+        if (!complete || line.len == 0) { bridge_tls_free(conn); close(c); buf_free(&line); return; }
+        JVal *req = json_parse(line.s);
+        const char *text = req ? json_get_str(req, "text") : NULL;
+        const char *from = req ? json_get_str(req, "from") : NULL;
+        JVal *from_value = req ? json_obj_get(req, "from") : NULL;
+        Buf resp;
+        buf_init(&resp);
+        if (!bridge_match(app->agent.tools.bridge_token, req ? json_get_str(req, "token") : NULL)) {
+            buf_puts(&resp, "{\"ok\":false,\"error\":\"unauthorized\"}\n");
+        } else if (!text) {
+            buf_puts(&resp, "{\"ok\":false,\"error\":\"expected {\\\"text\\\":...}\"}\n");
+        } else if (from_value && from_value->type != J_STR && from_value->type != J_NULL) {
+            buf_puts(&resp, "{\"ok\":false,\"error\":\"invalid from\"}\n");
+        } else {
+            Buf reply;
+            buf_init(&reply);
+            ServeSession session; int status = serve_session(app, from, &session);
+            if (status < 0) {
+                buf_puts(&resp, status == -2 ? "{\"ok\":false,\"error\":\"invalid from\"}\n" :
+                         status == -4 ? "{\"ok\":false,\"error\":\"session busy\"}\n" :
+                                        "{\"ok\":false,\"error\":\"session storage unavailable\"}\n");
+            } else {
+                int rc = session.agent.persistence_error ? -1 : agent_prompt(&session.agent, text, &reply);
+                if (session.agent.persistence_error || (rc == 0 &&
+                    (fsync(session.tempfd) != 0 || rename(session.temp, session.path) != 0))) {
+                    buf_puts(&resp, "{\"ok\":false,\"error\":\"session storage unavailable\"}\n");
+                } else {
+                    buf_puts(&resp, rc == 0 ? "{\"ok\":true,\"reply\":" : "{\"ok\":false,\"reply\":");
+                    json_quote(&resp, reply.s); buf_puts(&resp, "}\n");
+                }
+                agent_free(&session.agent); serve_session_close(&session);
+            }
+            buf_free(&reply);
+        }
+        if (conn) bridge_tls_write(conn, resp.s, resp.len, 5);
+        else { size_t off = 0; while (off < resp.len) { ssize_t n = send(c, resp.s + off, resp.len - off, 0); if (n < 0 && errno == EINTR) continue; if (n <= 0) break; off += (size_t)n; } }
+        buf_free(&resp);
+        json_free(req);
+        bridge_tls_free(conn);
+        close(c);
+        buf_free(&line);
+    }
+
 static int cmd_serve(App *app, int port) {
     if (!bridge_valid(app->agent.tools.bridge_token)) {
         fprintf(stderr, "[serve] set bridge_token (64 hex chars; openssl rand -hex 32)\n");
         return 1;
+    }
+    if (app->serve_workers < 1 || app->serve_workers > 256) {
+        fprintf(stderr, "[serve] serve_workers must be between 1 and 256\n"); return 1;
     }
     BridgeTlsCtx *tlsctx = NULL;
     if (app->serve_tls) {
@@ -468,78 +547,60 @@ static int cmd_serve(App *app, int port) {
         srv = -1;
     }
     freeaddrinfo(res);
-    if (srv < 0 || listen(srv, 8) != 0) {
+    if (srv < 0 || listen(srv, 64) != 0) {
         fprintf(stderr, "clawc: cannot listen on %d (plaintext is loopback-only)\n", port);
         return 1;
     }
     fprintf(stderr, "[serve] listening on %s:%d (one JSON object per line)\n", node, port);
     fprintf(stderr, "[serve] %s; tools auto-approved\n", app->serve_tls ? "TLS" : "plaintext on loopback");
-    for (;;) {
+    int flags = fcntl(srv, F_GETFL, 0);
+    if (flags < 0 || fcntl(srv, F_SETFL, flags | O_NONBLOCK) < 0) { close(srv); bridge_tls_server_free(tlsctx); return 1; }
+    pid_t *workers = xmalloc((size_t)app->serve_workers * sizeof *workers);
+    memset(workers, 0, (size_t)app->serve_workers * sizeof *workers);
+    serve_stop = 0;
+    struct sigaction sa, oldterm, oldint;
+    memset(&sa, 0, sizeof sa); sa.sa_handler = serve_stop_handler; sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, &oldterm); sigaction(SIGINT, &sa, &oldint);
+    signal(SIGPIPE, SIG_IGN);
+    fprintf(stderr, "[serve] bounded concurrency: %d workers\n", app->serve_workers);
+    while (!serve_stop) {
+        int i, slot = -1;
+        for (i = 0; i < app->serve_workers; i++) {
+            if (workers[i] && waitpid(workers[i], NULL, WNOHANG) == workers[i]) workers[i] = 0;
+            if (!workers[i] && slot < 0) slot = i;
+        }
+        struct pollfd pfd = { slot >= 0 ? srv : -1, POLLIN, 0 };
+        int ready = poll(&pfd, 1, 250);
+        if (serve_stop) break;
+        if (ready <= 0 || slot < 0) continue;
         int c = accept(srv, NULL, NULL);
         if (c < 0) continue;
-        BridgeTls *conn = app->serve_tls ? bridge_tls_accept(tlsctx, c, 5) : NULL;
-        if (app->serve_tls && !conn) { close(c); continue; }
-        Buf line;
-        buf_init(&line);
-        char ch;
-        int complete = 0;
-        struct timespec start, now;
-        if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
-            bridge_tls_free(conn); close(c); buf_free(&line); continue;
+        int cflags = fcntl(c, F_GETFL, 0);
+        struct timeval tv = {5, 0};
+        if (cflags < 0 || fcntl(c, F_SETFL, cflags & ~O_NONBLOCK) < 0 ||
+            setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv) < 0) { close(c); continue; }
+        pid_t pid = fork();
+        if (pid < 0) { fprintf(stderr, "[serve] worker fork failed\n"); close(c); continue; }
+        if (!pid) {
+            setpgid(0, 0); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); close(srv);
+            serve_client(app, tlsctx, c);
+            _exit(0);
         }
-        for (;;) {
-            struct pollfd pfd = { c, POLLIN, 0 };
-            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) break;
-            long long elapsed = (now.tv_sec - start.tv_sec) * 1000LL +
-                                (now.tv_nsec - start.tv_nsec) / 1000000LL;
-            if (elapsed >= 5000) break; /* absolute deadline, even for trickle input */
-            if (conn) {
-                if (bridge_tls_read(conn, &ch, 1, (int)((5999 - elapsed) / 1000)) != 1) break;
-            } else {
-                int ready = poll(&pfd, 1, (int)(5000 - elapsed));
-                if (ready < 0 && errno == EINTR) continue;
-                if (ready <= 0 || recv(c, &ch, 1, 0) != 1) break;
-            }
-            if (ch == '\n') { complete = 1; break; }
-            if (line.len >= 1024 * 1024) break;
-            buf_add(&line, &ch, 1);
-        }
-        if (!complete || line.len == 0) { bridge_tls_free(conn); close(c); buf_free(&line); continue; }
-        JVal *req = json_parse(line.s);
-        const char *text = req ? json_get_str(req, "text") : NULL;
-        const char *from = req ? json_get_str(req, "from") : NULL;
-        Buf resp;
-        buf_init(&resp);
-        if (!bridge_match(app->agent.tools.bridge_token, req ? json_get_str(req, "token") : NULL)) {
-            buf_puts(&resp, "{\"ok\":false,\"error\":\"unauthorized\"}\n");
-        } else if (!text) {
-            buf_puts(&resp, "{\"ok\":false,\"error\":\"expected {\\\"text\\\":...}\"}\n");
-        } else {
-            Buf reply;
-            buf_init(&reply);
-            Agent *sa = serve_session(app, from);
-            int rc = agent_prompt(sa, text, &reply);
-            buf_puts(&resp, "{\"ok\":");
-            buf_puts(&resp, rc == 0 ? "true" : "false");
-            buf_puts(&resp, ",\"reply\":");
-            json_quote(&resp, reply.s);
-            buf_puts(&resp, "}\n");
-            buf_free(&reply);
-        }
-        if (conn) bridge_tls_write(conn, resp.s, resp.len, 5);
-        else send(c, resp.s, resp.len, 0);
-        buf_free(&resp);
-        json_free(req);
-        bridge_tls_free(conn);
-        close(c);
-        buf_free(&line);
+        setpgid(pid, pid);
+        workers[slot] = pid; close(c);
     }
+    close(srv);
+    int i;
+    for (i = 0; i < app->serve_workers; i++) if (workers[i]) { kill(-workers[i], SIGTERM); kill(workers[i], SIGTERM); }
+    for (i = 0; i < app->serve_workers; i++) if (workers[i]) while (waitpid(workers[i], NULL, 0) < 0 && errno == EINTR) {}
+    free(workers); bridge_tls_server_free(tlsctx);
+    sigaction(SIGTERM, &oldterm, NULL); sigaction(SIGINT, &oldint, NULL);
     return 0;
 }
 
-/* ---- gateway entry points for the daemon supervisor ---- */
-
 #endif /* serve */
+
+/* ---- gateway entry points for the daemon supervisor ---- */
 
 #ifndef CLAWC_NO_TELEGRAM
 static int gw_telegram(void *ctx) {
@@ -605,9 +666,7 @@ static int tg_getme(const char *api_base, const char *token, int insecure, Buf *
 #endif
 
 static int cmd_autonomous(App *app) {
-    static const char *PROMPT =
-        "Autonomous work cycle: advance the top GOALS.md goal now; goal_done "
-        "when finished. No goals? Reply exactly: NO_GOALS.";
+    const char *PROMPT = packed_text(TXT_EXTRA_05);
     Agent a = app->agent;
     a.heartbeat_mode = 0;
     a.confirm = NULL;        /* unattended: risky tools are refused */
@@ -656,9 +715,7 @@ static int gw_discord(void *ctx) {
 #endif
 
 static int cmd_improve(App *app) {
-    static const char *PROMPT =
-        "Self-improvement review. reflect: new lessons (not in LESSONS.md); "
-        "write_skill: reusable procedures. End with one line on changes.";
+    const char *PROMPT = packed_text(TXT_EXTRA_06);
     Agent a = app->agent;
     a.heartbeat_mode = 0;
     a.confirm = NULL;
@@ -804,8 +861,7 @@ static int cmd_doctor(App *app) {
         printf("  [sandbox]   ok  %s (set \"sandbox\": \"os\")\n",
                sandbox_backend());
     else
-        printf("  [sandbox]   --  no OS sandbox on this platform; "
-               "clawc jail is the fallback for \"sandbox\": \"os\"\n");
+        fputs(packed_text(TXT_STDOUT_01), stdout);
 
     /* cron */
 #ifndef CLAWC_NO_CRON
@@ -869,7 +925,7 @@ static int cmd_cron(App *app, int argc, char **argv) {
                    jobs[i].enabled ? (jobs[i].every > 0 ? "recurring" : "one-shot") : "spent",
                    when, jobs[i].at > now ? jobs[i].at - now : 0LL, jobs[i].task);
         }
-        if (n == 0) printf("no cron jobs (add one: clawc cron add \"task\" --in 3600)\n");
+        if (n == 0) fputs(packed_text(TXT_STDOUT_02), stdout);
     } else if (str_eq(sub, "add")) {
         long long at = 0, every = 0;
         int bad = 0;
@@ -900,7 +956,7 @@ static int cmd_cron(App *app, int argc, char **argv) {
             }
         }
         if (bad) {
-            fprintf(stderr, "clawc: bad time spec (want HH:MM, or DAY HH:MM for --weekly)\n");
+            fputs(packed_text(TXT_EXTRA_08), stderr);
             rc = 2;
         } else if (task.len == 0) {
             fprintf(stderr, "clawc: cron add needs a task\n");
@@ -954,8 +1010,7 @@ static int cmd_cron(App *app, int argc, char **argv) {
         if (fired) cron_save(ws, jobs, n);
         else if (!app->quiet) fprintf(stderr, "[cron] nothing due\n");
     } else {
-        fprintf(stderr, "usage: clawc cron list|add TASK [--in N|--at T] "
-                        "[--every N]|rm ID|--run-due\n");
+        fputs(packed_text(TXT_EXTRA_09), stderr);
         rc = 2;
     }
     cron_free(jobs, n);
@@ -1070,13 +1125,7 @@ static int cmd_daemon(App *app) {
     }
 #endif
     if (n == 0) {
-        fprintf(stderr,
-            "clawc: daemon: no gateways configured.\n"
-            "  set telegram_token / serve_port / heartbeat_interval in the config file,\n"
-            "  or add a cron.json in the workspace (cron gateway),\n"
-            "  environment (CLAWC_TELEGRAM_TOKEN, CLAWC_SERVE_PORT,\n"
-            "  CLAWC_HEARTBEAT_INTERVAL), or flags (-token, -p, -i).\n"
-            "  See effective settings with: clawc config\n");
+        fputs(packed_text(TXT_EXTRA_10), stderr);
         return 2;
     }
     return daemon_run(gws, n);
@@ -1220,21 +1269,18 @@ static int cmd_setup(const char *path, int insecure) {
     }
     Buf f;
     buf_init(&f);
-    buf_puts(&f, "{\n  \"_note\": \"written by clawc setup\",\n  \"workspace\": ");
-    json_quote(&f, ws.s);
-    buf_puts(&f, ",\n  \"api_url\": ");
-    json_quote(&f, url.s);
-    buf_puts(&f, ",\n  \"model\": ");
-    json_quote(&f, model.s);
-    if (key.len > 0) { buf_puts(&f, ",\n  \"api_key\": "); json_quote(&f, key.s); }
-    if (tok.len > 0) { buf_puts(&f, ",\n  \"telegram_token\": "); json_quote(&f, tok.s); }
-    if (allow.len > 0) { buf_puts(&f, ",\n  \"telegram_allow\": "); json_quote(&f, allow.s); }
-    if (users.len > 0) { buf_puts(&f, ",\n  \"telegram_users\": "); json_quote(&f, users.s); }
+    json_append_quoted(&f, packed_text(TXT_012), ws.s);
+    json_append_quoted(&f, packed_text(TXT_013), url.s);
+    json_append_quoted(&f, ",\n  \"model\": ", model.s);
+    if (key.len > 0) { json_append_quoted(&f, packed_text(TXT_014), key.s); }
+    if (tok.len > 0) { json_append_quoted(&f, packed_text(TXT_015), tok.s); }
+    if (allow.len > 0) { json_append_quoted(&f, packed_text(TXT_016), allow.s); }
+    if (users.len > 0) { json_append_quoted(&f, packed_text(TXT_017), users.s); }
     if (atoi(port.s) > 0) buf_printf(&f, ",\n  \"serve_port\": %d", atoi(port.s));
     if (atoi(hb.s) > 0) buf_printf(&f, ",\n  \"heartbeat_interval\": %d", atoi(hb.s));
     if (str_starts(yes.s, "y") || str_starts(yes.s, "Y") ||
         str_eq(yes.s, "on") || str_eq(yes.s, "true"))
-        buf_puts(&f, ",\n  \"auto_approve\": true");
+        buf_puts(&f, packed_text(TXT_018));
     buf_puts(&f, "\n}\n");
     if (write_file(path, f.s) != 0) {
         fprintf(stderr, "clawc: cannot write %s: %s\n", path, err_str(errno));
@@ -1264,10 +1310,7 @@ static int cmd_setup(const char *path, int insecure) {
         printf("\nwrote %s (mode 600)\n\n", path);
         cfg_dump(&c, stdout);
     }
-    printf("\nnext steps:\n"
-           "  clawc chat      # talk to the agent here\n"
-           "  clawc daemon    # run all configured gateways (telegram/serve/heartbeat)\n"
-           "  clawc config    # review these settings any time\n");
+    fputs(packed_text(TXT_STDOUT_03), stdout);
     buf_free(&v); buf_free(&ws); buf_free(&url); buf_free(&model); buf_free(&key);
     buf_free(&tok); buf_free(&allow); buf_free(&users); buf_free(&port); buf_free(&hb); buf_free(&yes);
     return 0;
@@ -1311,23 +1354,59 @@ static void cli_free(Cli *v) {
     }
 }
 
+/* Flag-to-field map keeps CLI overrides in one place. Offsets are derived
+   by the compiler, so the layout works on 32- and 64-bit POSIX systems. */
+struct CliField { unsigned short offset; unsigned char key, opt; unsigned flag; };
+#define CLI_FIELD(field, flag, key, opt) { offsetof(Cli, field), key, opt, flag }
+static const struct CliField cli_strings[] = {
+    CLI_FIELD(ws,F_WS,CK_WORKSPACE,'w'), CLI_FIELD(model,F_MODEL,CK_MODEL,'m'),
+    CLI_FIELD(url,F_URL,CK_API_URL,'u'), CLI_FIELD(key,F_KEY,CK_API_KEY,'k'),
+    CLI_FIELD(kind,F_KIND,CK_API_KIND,'a'), CLI_FIELD(sandbox,F_SB,CK_SANDBOX,'x'),
+    CLI_FIELD(tg_token,F_TGTOK,CK_TG_TOKEN,0), CLI_FIELD(tg_allow,F_TGALW,CK_TG_ALLOW,0),
+    CLI_FIELD(serve_bind,F_BIND,CK_SERVE_BIND,'b')
+};
+static const struct CliField cli_numbers[] = {
+    CLI_FIELD(max_steps,F_MAXST,CK_MAX_STEPS,'s'), CLI_FIELD(timeout,F_TOUT,CK_TIMEOUT,'t'),
+    CLI_FIELD(tg_poll,F_TGPOLL,CK_TG_POLL,0), CLI_FIELD(serve_port,F_SERVE,CK_SERVE_PORT,'p'),
+    CLI_FIELD(hb_interval,F_HB,CK_HB_INTERVAL,'i')
+};
+#undef CLI_FIELD
+static int cli_short_value(Cli *cli, char opt, const char *arg, unsigned allowed) {
+    size_t j;
+    for (j=0; j<sizeof cli_strings/sizeof *cli_strings; j++) {
+        const struct CliField *f=&cli_strings[j];
+        if (opt == f->opt && (f->flag & allowed)) {
+            char **p=(char **)((char *)cli + f->offset);
+            *p=xstrdup(arg); cli->set |= f->flag; return 1;
+        }
+    }
+    for (j=0; j<sizeof cli_numbers/sizeof *cli_numbers; j++) {
+        const struct CliField *f=&cli_numbers[j];
+        if (opt == f->opt && (f->flag & allowed)) {
+            long *p=(long *)((char *)cli + f->offset);
+            *p=atol(arg); cli->set |= f->flag; return 1;
+        }
+    }
+    return 0;
+}
 static void apply_cli(Cfg *c, const Cli *v) {
-    if (v->set & F_WS)     cfg_set_str(c, CK_WORKSPACE, xstrdup(v->ws), "flag");
-    if (v->set & F_MODEL)  cfg_set_str(c, CK_MODEL, xstrdup(v->model), "flag");
-    if (v->set & F_URL)    cfg_set_str(c, CK_API_URL, xstrdup(v->url), "flag");
-    if (v->set & F_KEY)    cfg_set_str(c, CK_API_KEY, xstrdup(v->key), "flag");
-    if (v->set & F_KIND)   cfg_set_str(c, CK_API_KIND, xstrdup(v->kind), "flag");
-    if (v->set & F_SB)     cfg_set_str(c, CK_SANDBOX, xstrdup(v->sandbox), "flag");
-    if (v->set & F_TGTOK)  cfg_set_str(c, CK_TG_TOKEN, xstrdup(v->tg_token), "flag");
-    if (v->set & F_TGALW)  cfg_set_str(c, CK_TG_ALLOW, xstrdup(v->tg_allow), "flag");
-    if (v->set & F_MAXST)  cfg_set_int(c, CK_MAX_STEPS, v->max_steps, "flag");
-    if (v->set & F_TOUT)   cfg_set_int(c, CK_TIMEOUT, v->timeout, "flag");
-    if (v->set & F_TGPOLL) cfg_set_int(c, CK_TG_POLL, v->tg_poll, "flag");
-    if (v->set & F_SERVE)  cfg_set_int(c, CK_SERVE_PORT, v->serve_port, "flag");
-    if (v->set & F_BIND)   cfg_set_str(c, CK_SERVE_BIND, xstrdup(v->serve_bind), "flag");
-    if (v->set & F_HB)     cfg_set_int(c, CK_HB_INTERVAL, v->hb_interval, "flag");
-    if (v->set & F_INSEC)  cfg_set_bool(c, CK_INSECURE, 1, "flag");
-    if (v->set & F_YES)    cfg_set_bool(c, CK_AUTO_APPROVE, 1, "flag");
+    size_t i;
+    for (i=0; i<sizeof cli_strings/sizeof *cli_strings; i++) {
+        const struct CliField *f=&cli_strings[i];
+        if (v->set & f->flag) {
+            char *const *p=(char *const *)((const char *)v + f->offset);
+            cfg_set_str(c, f->key, xstrdup(*p), "flag");
+        }
+    }
+    for (i=0; i<sizeof cli_numbers/sizeof *cli_numbers; i++) {
+        const struct CliField *f=&cli_numbers[i];
+        if (v->set & f->flag) {
+            const long *p=(const long *)((const char *)v + f->offset);
+            cfg_set_int(c, f->key, *p, "flag");
+        }
+    }
+    if (v->set & F_INSEC) cfg_set_bool(c, CK_INSECURE, 1, "flag");
+    if (v->set & F_YES) cfg_set_bool(c, CK_AUTO_APPROVE, 1, "flag");
 }
 
 static void tg_parse_allow(TgCfg *tg, const char *allow_str) {
@@ -1363,25 +1442,24 @@ int main(int argc, char **argv) {
     for (; i < argc; i++) {
         const char *a = argv[i];
         if (a[0] != '-') break;
-        if (str_eq(a, "-c") && i + 1 < argc) { cli.cfg_path = xstrdup(argv[++i]); }
-        else if (str_eq(a, "-w") && i + 1 < argc) { cli.ws = xstrdup(argv[++i]); cli.set |= F_WS; }
-        else if (str_eq(a, "-m") && i + 1 < argc) { cli.model = xstrdup(argv[++i]); cli.set |= F_MODEL; }
-        else if (str_eq(a, "-u") && i + 1 < argc) { cli.url = xstrdup(argv[++i]); cli.set |= F_URL; }
-        else if (str_eq(a, "-k") && i + 1 < argc) { cli.key = xstrdup(argv[++i]); cli.set |= F_KEY; }
-        else if (str_eq(a, "-a") && i + 1 < argc) { cli.kind = xstrdup(argv[++i]); cli.set |= F_KIND; }
-        else if (str_eq(a, "-s") && i + 1 < argc) { cli.max_steps = atol(argv[++i]); cli.set |= F_MAXST; }
-        else if (str_eq(a, "-t") && i + 1 < argc) { cli.timeout = atol(argv[++i]); cli.set |= F_TOUT; }
-        else if (str_eq(a, "-x") && i + 1 < argc) { cli.sandbox = xstrdup(argv[++i]); cli.set |= F_SB; }
-        else if (str_eq(a, "-q")) { app.quiet = 1; cli.set |= F_QUIET; }
-        else if (str_eq(a, "--yes")) { cli.set |= F_YES; }
-        else if (str_eq(a, "--insecure")) { cli.set |= F_INSEC; }
-        else if (str_eq(a, "-h") || str_eq(a, "--help")) { usage(stdout); return 0; }
-        else {
-            fprintf(stderr, "clawc: unknown option %s\n", a);
-            usage(stderr);
-            cli_free(&cli);
-            return 2;
+        if (a[1] && !a[2]) {
+            if (a[1] == 'q') { app.quiet = 1; cli.set |= F_QUIET; continue; }
+            if (a[1] == 'h') { usage(stdout); return 0; }
+            if (i + 1 < argc) {
+                if (a[1] == 'c') { cli.cfg_path = xstrdup(argv[++i]); continue; }
+                if (cli_short_value(&cli, a[1], argv[i+1],
+                                    F_WS|F_MODEL|F_URL|F_KEY|F_KIND|F_SB|F_MAXST|F_TOUT)) {
+                    i++; continue;
+                }
+            }
         }
+        if (str_eq(a, "--yes")) { cli.set |= F_YES; continue; }
+        if (str_eq(a, "--insecure")) { cli.set |= F_INSEC; continue; }
+        if (str_eq(a, "--help")) { usage(stdout); return 0; }
+        fprintf(stderr, "clawc: unknown option %s\n", a);
+        usage(stderr);
+        cli_free(&cli);
+        return 2;
     }
     if (i >= argc) { usage(stderr); cli_free(&cli); return 2; }
     const char *cmd = argv[i++];
@@ -1395,15 +1473,14 @@ int main(int argc, char **argv) {
 
     /* subcommand-local flags (all verbs except run/fetch, whose args are payload):
        -c CONFIG, daemon -i/-p, serve -p, telegram -token/-allow/-poll/--once */
-    if (!str_eq(cmd, "run") && !str_eq(cmd, "fetch") && !str_eq(cmd, "cron")) {
+    if (!str_eq(cmd, "run") && !str_eq(cmd, "fetch") && !str_eq(cmd, "cron") && !str_eq(cmd, "swarm")) {
         for (; i < argc; i++) {
             if ((str_eq(argv[i], "-c") || str_eq(argv[i], "--config")) && i + 1 < argc) {
                 free(cli.cfg_path);
                 cli.cfg_path = xstrdup(argv[++i]);
             }
-            else if (str_eq(argv[i], "-i") && i + 1 < argc) { cli.hb_interval = atol(argv[++i]); cli.set |= F_HB; }
-            else if (str_eq(argv[i], "-p") && i + 1 < argc) { cli.serve_port = atol(argv[++i]); cli.set |= F_SERVE; }
-            else if (str_eq(argv[i], "-b") && i + 1 < argc) { cli.serve_bind = xstrdup(argv[++i]); cli.set |= F_BIND; }
+            else if (argv[i][0] == '-' && argv[i][1] && !argv[i][2] && i + 1 < argc &&
+                     cli_short_value(&cli, argv[i][1], argv[i+1], F_HB|F_SERVE|F_BIND)) { i++; }
             else if (str_eq(argv[i], "-token") && i + 1 < argc) { cli.tg_token = xstrdup(argv[++i]); cli.set |= F_TGTOK; }
             else if (str_eq(argv[i], "-allow") && i + 1 < argc) { cli.tg_allow = xstrdup(argv[++i]); cli.set |= F_TGALW; }
             else if (str_eq(argv[i], "-poll") && i + 1 < argc) { cli.tg_poll = atol(argv[++i]); cli.set |= F_TGPOLL; }
@@ -1524,6 +1601,7 @@ int main(int argc, char **argv) {
     app.serve_port = cfg.serve_port;
     app.serve_bind = cfg.serve_bind;
     app.serve_tls = cfg.serve_tls;
+    app.serve_workers = cfg.serve_workers;
     app.serve_cert = cfg.serve_cert;
     app.serve_key = cfg.serve_key;
     app.hb_interval = cfg.hb_interval;
@@ -1576,13 +1654,13 @@ int main(int argc, char **argv) {
             }
             if (!so || access(so, R_OK) != 0)
                 fprintf(stderr, "[sandbox] jail shim unavailable\n");
-            fprintf(stderr, "[sandbox] no OS sandbox backend - clawc jail "
-                            "active (best effort; not secure containment)\n");
+            fputs(packed_text(TXT_EXTRA_13), stderr);
         }
     }
 
     int rc;
-    if (str_eq(cmd, "run")) rc = cmd_run(&app, argc - i, argv + i, cfg.auto_approve);
+    if (str_eq(cmd, "swarm")) { app.agent.auto_approve = cfg.auto_approve; rc = i < argc ? swarm_run(&app.agent, argv[i]) : 2; }
+    else if (str_eq(cmd, "run")) rc = cmd_run(&app, argc - i, argv + i, cfg.auto_approve);
     else if (str_eq(cmd, "chat")) rc = cmd_chat(&app, cfg.auto_approve);
 #ifndef CLAWC_NO_HEARTBEAT
     else if (str_eq(cmd, "heartbeat")) rc = cmd_heartbeat(&app);

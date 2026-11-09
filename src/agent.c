@@ -1,6 +1,7 @@
 /* clawc - agent.c */
 #define _XOPEN_SOURCE 700
 #include <pthread.h>
+#include "packed_text.h"
 #include "agent.h"
 #include "history.h"
 #include "json.h"
@@ -50,45 +51,37 @@ static Msg *hist_push(Agent *a) {
 static void hist_add(Agent *a, const char *role, const char *content) {
     Msg *m = hist_push(a);
     m->role = xstrdup(role);
-    m->content = xstrdup(content ? content : "");
-    if (a->session_path) hist_append(a->session_path, m);
+    m->content = xstrdup0(content);
+    if (a->session_path && hist_append(a->session_path, m) != 0) a->persistence_error = 1;
 }
 
 /* ---- sanitization: drop tool messages without a matching pending tool_call,
    and strip tool_calls left unanswered (they break both API dialects). ---- */
 
-static void strip_calls(Msg *m, const int *dead) {
-    if (m->ncalls <= 0) return;
-    ToolCall *fresh = NULL;
-    int n = 0, i;
-    for (i = 0; i < m->ncalls; i++)
-        if (!dead[i]) n++;
-    if (n == m->ncalls) return;
-    if (n > 0) {
-        fresh = xmalloc((size_t)n * sizeof *fresh);
-        int k = 0;
+/* Pending entries are ordered by owning message. Remove each owner's
+   unanswered calls once, so indexes stay valid even with several pending
+   calls from the same assistant message. */
+typedef struct { int msg, call; } Pending;
+static void discard_pending(Agent *a, Pending *pending, int np) {
+    int j = 0;
+    while (j < np) {
+        int owner = pending[j].msg, i, n = 0;
+        Msg *m = &a->hist[owner];
+        int *dead = xmalloc((size_t)m->ncalls * sizeof *dead);
+        memset(dead, 0, (size_t)m->ncalls * sizeof *dead);
+        do { dead[pending[j++].call] = 1; } while (j < np && pending[j].msg == owner);
         for (i = 0; i < m->ncalls; i++) {
-            if (!dead[i]) fresh[k++] = m->calls[i];
-            else {
-                free(m->calls[i].id);
-                free(m->calls[i].name);
-                free(m->calls[i].args);
-            }
+            if (!dead[i]) m->calls[n++] = m->calls[i];
+            else { free(m->calls[i].id); free(m->calls[i].name); free(m->calls[i].args); }
         }
-    } else {
-        for (i = 0; i < m->ncalls; i++) {
-            free(m->calls[i].id);
-            free(m->calls[i].name);
-            free(m->calls[i].args);
-        }
+        m->ncalls = n;
+        if (!n) { free(m->calls); m->calls = NULL; }
+        free(dead);
     }
-    free(m->calls);
-    m->calls = fresh;
-    m->ncalls = n;
 }
 
 static void sanitize(Agent *a) {
-    int *pm = NULL, *pc = NULL; /* pending: msg index, call index */
+    Pending *pending = NULL;
     int np = 0, pcap = 0;
 
     int i, w = 0;
@@ -97,8 +90,8 @@ static void sanitize(Agent *a) {
         if (str_eq(m->role, "tool")) {
             int j, found = -1;
             for (j = 0; j < np; j++) {
-                Msg *own = &a->hist[pm[j]];
-                if (own->calls[pc[j]].id && str_eq(own->calls[pc[j]].id, m->tool_call_id)) {
+                Msg *own = &a->hist[pending[j].msg];
+                if (own->calls[pending[j].call].id && str_eq(own->calls[pending[j].call].id, m->tool_call_id)) {
                     found = j;
                     break;
                 }
@@ -107,8 +100,7 @@ static void sanitize(Agent *a) {
                 msg_clear(m);
                 continue; /* orphan tool result */
             }
-            memmove(&pm[found], &pm[found + 1], (size_t)(np - found - 1) * sizeof *pm);
-            memmove(&pc[found], &pc[found + 1], (size_t)(np - found - 1) * sizeof *pc);
+            memmove(&pending[found], &pending[found + 1], (size_t)(np - found - 1) * sizeof *pending);
             np--;
         } else if (str_eq(m->role, "assistant") && m->ncalls > 0) {
             /* every call becomes pending */
@@ -116,52 +108,23 @@ static void sanitize(Agent *a) {
             for (j = 0; j < m->ncalls; j++) {
                 if (np + 1 > pcap) {
                     pcap = pcap ? pcap * 2 : 8;
-                    pm = xrealloc(pm, (size_t)pcap * sizeof *pm);
-                    pc = xrealloc(pc, (size_t)pcap * sizeof *pc);
+                    pending = xrealloc(pending, (size_t)pcap * sizeof *pending);
                 }
-                pm[np] = w;
-                pc[np] = j;
+                pending[np].msg = w;
+                pending[np].call = j;
                 np++;
             }
         } else if (str_eq(m->role, "user")) {
             /* unanswered calls before a new user turn must be stripped */
-            if (np > 0) {
-                /* mark dead: group by msg */
-                int j;
-                for (j = 0; j < np; j++) {
-                    Msg *own = &a->hist[pm[j]];
-                    int *dead = xmalloc((size_t)own->ncalls * sizeof(int));
-                    int k;
-                    for (k = 0; k < own->ncalls; k++) dead[k] = 0;
-                    /* mark all pending calls of this msg */
-                    int j2;
-                    for (j2 = 0; j2 < np; j2++)
-                        if (pm[j2] == pm[j]) dead[pc[j2]] = 1;
-                    strip_calls(own, dead);
-                    free(dead);
-                }
-                np = 0;
-            }
+            discard_pending(a, pending, np);
+            np = 0;
         }
         if (w != i) a->hist[w] = *m;
         w++;
     }
     /* trailing unanswered calls */
-    if (np > 0) {
-        int j;
-        for (j = 0; j < np; j++) {
-            Msg *own = &a->hist[pm[j]];
-            int *dead = xmalloc((size_t)own->ncalls * sizeof(int));
-            int k, j2;
-            for (k = 0; k < own->ncalls; k++) dead[k] = 0;
-            for (j2 = 0; j2 < np; j2++)
-                if (pm[j2] == pm[j]) dead[pc[j2]] = 1;
-            strip_calls(own, dead);
-            free(dead);
-        }
-    }
-    free(pm);
-    free(pc);
+    discard_pending(a, pending, np);
+    free(pending);
     a->nhist = w;
 }
 
@@ -206,9 +169,7 @@ void agent_trim_budget(Agent *a) {
 
     /* compact the on-disk log to match memory */
     if (a->session_path && a->nhist >= 0) {
-        hist_truncate(a->session_path);
-        int i;
-        for (i = 0; i < a->nhist; i++) hist_append(a->session_path, &a->hist[i]);
+        if (hist_write(a->session_path, a->hist, a->nhist, 0) != 0) a->persistence_error = 1;
     }
 }
 
@@ -228,35 +189,29 @@ void agent_open_session(Agent *a, const char *path) {
     a->hist = NULL;
     a->nhist = a->histcap = 0;
 
-    hist_load(path, &a->hist, &a->nhist);
+    a->persistence_error = 0;
+    if (hist_load(path, &a->hist, &a->nhist) != 0) a->persistence_error = 1;
     a->histcap = a->nhist;
-    sanitize(a);
-    agent_trim_budget(a);
+    if (!a->persistence_error) { sanitize(a); agent_trim_budget(a); }
     if (a->nhist > 0)
         fprintf(stderr, "[session] %s: %d messages loaded\n", a->session_name, a->nhist);
 }
 
-void agent_clear_session(Agent *a) {
-    agent_reset(a);
-    if (a->session_path) hist_truncate(a->session_path);
+int agent_clear_session(Agent *a) {
+    if (a->session_path && hist_truncate(a->session_path) != 0) {
+        a->persistence_error = 1; return -1;
+    }
+    agent_reset(a); a->persistence_error = 0; return 0;
 }
 
 char *agent_system_prompt(Agent *a) {
     Buf b;
     buf_init(&b);
     buf_puts(&b,
-        "You are clawc, a claw-style agent.\n\n"
-        "# Rules\n"
-        "- Prefer tools over guessing; verify when unsure.\n"
-        "- Improve yourself: write_skill = procedure; reflect = lesson.\n"
-        "- Never expose secrets found on the system unless asked.\n"
-        "- Keep replies short and concrete.\n"
-        "- When done, reply with the final answer and no further tool calls.\n"
-        "- Work autonomously: goal_add/goal_done manage GOALS.md.\n");
+        packed_text(TXT_000));
     if (a->heartbeat_mode)
         buf_puts(&b,
-            "- HEARTBEAT: waking on a timer; check the checklist below. "
-            "Nothing to do? Reply exactly: HEARTBEAT_OK.\n");
+            packed_text(TXT_001));
 
     char *soul = tools_read_soul(&a->tools);
     if (soul && soul[0]) buf_printf(&b, "\n# Identity (SOUL.md)\n%s\n", soul);
@@ -299,9 +254,15 @@ char *agent_system_prompt(Agent *a) {
     return b.s;
 }
 
+static void tool_result_msg(Msg *m, const char *result, const char *id) {
+    m->role = xstrdup("tool");
+    m->content = xstrdup(result);
+    m->tool_call_id = xstrdup(id);
+}
+
 static void copy_call(ToolCall *dst, const ToolCall *src) {
-    dst->id = xstrdup(src->id ? src->id : "");
-    dst->name = xstrdup(src->name ? src->name : "");
+    dst->id = xstrdup0(src->id);
+    dst->name = xstrdup0(src->name);
     dst->args = xstrdup(src->args ? src->args : "{}");
 }
 
@@ -341,7 +302,7 @@ static void *sub_thread(void *p) {
 
 static void run_subagent(Agent *parent, const JVal *args, Buf *out) {
     if (parent->depth >= 1) {
-        buf_puts(out, "error: subagents cannot nest");
+        buf_puts(out, packed_text(TXT_002));
         return;
     }
     char allows[MAX_SUBTASKS][256];
@@ -401,7 +362,7 @@ static void run_subagent(Agent *parent, const JVal *args, Buf *out) {
         }
     }
     if (n == 0) {
-        buf_puts(out, "error: subagent needs a \"task\" or \"tasks\" list");
+        buf_puts(out, packed_text(TXT_003));
         return;
     }
 
@@ -520,8 +481,7 @@ static void agent_compact(Agent *a) {
     Msg in[2];
     memset(in, 0, sizeof in);
     in[0].role = (char *)"system";
-    in[0].content = (char *)"Compress this conversation for continuity: "
-        "facts, preferences, decisions, open tasks, paths.";
+    in[0].content = (char *)packed_text(TXT_SUMMARY);
     in[1].role = (char *)"user";
     in[1].content = seg.s;
     Msg out;
@@ -540,7 +500,7 @@ static void agent_compact(Agent *a) {
         int w = head + 1;
         for (i = cut; i < a->nhist; i++) a->hist[w++] = a->hist[i];
         a->nhist = w;
-        if (a->session_path) hist_truncate(a->session_path);
+        if (a->session_path && hist_truncate(a->session_path) != 0) a->persistence_error = 1;
     }
     free(err);
     msg_clear(&out);
@@ -552,7 +512,7 @@ int agent_prompt(Agent *a, const char *user, Buf *reply) {
 }
 
 int agent_prompt_img(Agent *a, const char *user, const char *img_path, Buf *reply) {
-    agent_compact(a); /* summarize old turns before the request is built */
+    if (!a->persistence_error) agent_compact(a); /* summarize old turns before the request is built */
     /* OS confinement is applied once at startup (main.c) and is permanent;
        with "sandbox": "os" the process either got confined there or refused
        to start.  Nothing to do per prompt. */
@@ -572,13 +532,13 @@ int agent_prompt_img(Agent *a, const char *user, const char *img_path, Buf *repl
     push->role = xstrdup("system");
     push->content = sys;
 
-    int i;
+    int i, rc = 0, calls_this_run = 0, used_write_skill = 0;
     for (i = 0; i < a->nhist; i++) {
         PUSH();
         push->role = xstrdup(a->hist[i].role);
-        push->content = xstrdup(a->hist[i].content ? a->hist[i].content : "");
+        push->content = xstrdup0(a->hist[i].content);
         if (a->hist[i].img_path) push->img_path = xstrdup(a->hist[i].img_path);
-        push->tool_call_id = xstrdup(a->hist[i].tool_call_id ? a->hist[i].tool_call_id : "");
+        push->tool_call_id = xstrdup0(a->hist[i].tool_call_id);
         if (a->hist[i].ncalls) {
             push->calls = xmalloc((size_t)a->hist[i].ncalls * sizeof *push->calls);
             memset(push->calls, 0, (size_t)a->hist[i].ncalls * sizeof *push->calls);
@@ -589,13 +549,13 @@ int agent_prompt_img(Agent *a, const char *user, const char *img_path, Buf *repl
         }
     }
     hist_add(a, "user", user);
+    if (a->persistence_error) { rc = -1; goto cleanup; }
     PUSH();
     push->role = xstrdup("user");
     push->content = xstrdup(user);
     if (img_path && img_path[0]) push->img_path = xstrdup(img_path);
 
-    int step, rc = 0;
-    int calls_this_run = 0, used_write_skill = 0;
+    int step;
     a->streamed_reply = 0;
     for (step = 0; step <= a->max_steps; step++) {
         Msg out;
@@ -627,7 +587,7 @@ llm_ok:
 
         Msg *h = hist_push(a);
         h->role = xstrdup("assistant");
-        h->content = xstrdup(out.content ? out.content : "");
+        h->content = xstrdup0(out.content);
         if (out.ncalls) {
             h->calls = xmalloc((size_t)out.ncalls * sizeof *h->calls);
             memset(h->calls, 0, (size_t)out.ncalls * sizeof *h->calls);
@@ -636,7 +596,8 @@ llm_ok:
             for (j = 0; j < out.ncalls; j++)
                 copy_call(&h->calls[j], &out.calls[j]);
         }
-        if (a->session_path) hist_append(a->session_path, h);
+        if (a->session_path && hist_append(a->session_path, h) != 0) a->persistence_error = 1;
+        if (a->persistence_error) { rc = -1; break; }
 
         if (out.ncalls == 0) {
             buf_puts(reply, out.content ? out.content : "");
@@ -644,7 +605,7 @@ llm_ok:
             break;
         }
         if (step == a->max_steps) {
-            buf_puts(reply, "[agent stopped: max tool steps reached]");
+            buf_puts(reply, packed_text(TXT_004));
             rc = -1;
             break;
         }
@@ -658,8 +619,7 @@ llm_ok:
             int executed = 1;
             if (!args && out.calls[j].args && out.calls[j].args[0] &&
                 !str_eq(out.calls[j].args, "{}")) {
-                buf_puts(&result, "error: malformed JSON arguments - re-issue "
-                                  "this tool call with a valid JSON object");
+                buf_puts(&result, packed_text(TXT_005));
                 executed = 0;
             }
 
@@ -671,8 +631,7 @@ llm_ok:
                 if (a->confirm) approved = a->confirm(a->cb_user, desc);
                 else approved = 0; /* no way to ask (heartbeat): refuse */
                 if (!approved) {
-                    buf_puts(&result, "refused: needs confirmation and was not "
-                                      "approved. Do not retry; ask the user.");
+                    buf_puts(&result, packed_text(TXT_006));
                     executed = 0;
                 }
             }
@@ -683,7 +642,7 @@ llm_ok:
                        !csv_has(a->tools_allow, tname)) {
                 buf_free(&result);
                 buf_init(&result);
-                buf_puts(&result, "error: tool not available to this subagent");
+                buf_puts(&result, packed_text(TXT_007));
             } else if (executed) {
                 if (a->on_status && tname) {
                     char phase[160];
@@ -706,23 +665,22 @@ llm_ok:
                      out.calls[j].id && out.calls[j].id[0] ? out.calls[j].id : "call_0");
 
             PUSH();
-            push->role = xstrdup("tool");
-            push->content = xstrdup(result.s);
-            push->tool_call_id = xstrdup(tid);
-
+            tool_result_msg(push, result.s, tid);
             Msg *ht = hist_push(a);
-            ht->role = xstrdup("tool");
-            ht->content = xstrdup(result.s);
-            ht->tool_call_id = xstrdup(tid);
-            if (a->session_path) hist_append(a->session_path, ht);
+            tool_result_msg(ht, result.s, tid);
+            if (a->session_path && hist_append(a->session_path, ht) != 0) a->persistence_error = 1;
             buf_free(&result);
+            if (a->persistence_error) { rc = -1; break; }
         }
+        if (rc != 0) break;
     }
 #undef PUSH
 
+cleanup:
     for (i = 0; i < n; i++) msg_clear(&msgs[i]);
     free(msgs);
-    agent_trim_budget(a);
+    if (!a->persistence_error) agent_trim_budget(a);
+    if (a->persistence_error) { rc = -1; buf_free(reply); buf_init(reply); buf_puts(reply, packed_text(TXT_008)); }
 
     /* auto-learn (Hermes-style): after a complex task, extract a skill or
        lesson while the experience is fresh */

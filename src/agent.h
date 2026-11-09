@@ -25,6 +25,7 @@ typedef struct {
     int  auto_learn;     /* after complex tasks, run a learning pass */
     int  learning_pass;  /* inside the learning pass (blocks recursion) */
     const char *tools_allow; /* comma list of tool names, NULL = all */
+    int  persistence_error; /* a history operation failed */
     int  streamed_reply; /* out: 1 if the last reply arrived via on_delta */
 } Agent;
 
@@ -37,7 +38,7 @@ void agent_reset(Agent *a);   /* clear conversation history (memory only) */
 void agent_open_session(Agent *a, const char *path);
 
 /* /reset: clear history AND truncate the session file. */
-void agent_clear_session(Agent *a);
+int agent_clear_session(Agent *a);
 
 /* Turn-aware trim to budget (CLAWC_HISTORY_CHARS / CLAWC_HISTORY_MSGS envs).
    Runs automatically at the end of each prompt and after loading history. */
