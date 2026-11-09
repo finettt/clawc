@@ -147,15 +147,25 @@ size: $(TARGET)
 debug: $(SRC) $(HDR)
 	$(CC) -std=c99 -O0 -g -Wall -Wextra -o $(TARGET)-debug $(SRC) $(LDLIBS)
 
+# One Python entry point runs the full functional regression suite. Optional
+# sanitizer and mutational-fuzz targets use the same Python fixtures.
 test: $(TARGET)
-	HOSTCC="$(HOSTCC)" sh test/text_pack_test.sh
-	HOSTCC="$(HOSTCC)" sh test/json_unicode_test.sh
-	HOSTCC="$(HOSTCC)" python3 test/ministrip_test.py
-	@if [ "$(HARDEN)" = 1 ] && [ "$(UNAME_S)" = Linux ]; then python3 test/elf_hardening_test.py "$(TARGET)"; fi
-	python3 test/cli_config_test.py "$(TARGET)"
-	bash test/run_tests.sh
+	HOSTCC="$(HOSTCC)" python3 test/run_python_tests.py --binary "$(TARGET)" $(if $(filter 1,$(HARDEN)),,--skip-harden)
+
+test-asan: $(TARGET)
+	HOSTCC="$(HOSTCC)" CC="$(CC)" python3 test/run_python_tests.py --binary "$(TARGET)" --sanitizers $(if $(filter 1,$(HARDEN)),,--skip-harden)
+
+test-fuzz:
+	CC="$(CC)" python3 test/fuzz_json.py 100000
+
+test-fuzz-asan:
+	CC="$(CC)" python3 test/fuzz_json.py 100000 --sanitize
+
+# Compatibility aliases for the initial Python migration targets.
+test-python: test
+test-python-asan: test-asan
 
 clean:
 	rm -f $(TARGET) $(TARGET)-debug $(TARGET)-static $(TARGET)-*
 
-.PHONY: all cross musl size debug test clean
+.PHONY: all cross musl size debug test test-asan test-fuzz test-fuzz-asan test-python test-python-asan clean
