@@ -32,13 +32,17 @@ import sys
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import socket, threading, base64, hashlib
 
+RISKY = "/tmp/clawc-risky-test"
+CANARY = "/home/user/landlock-canary"
+RAW_ESCAPE = "/tmp/clawc-rawsys-escape"
+WORKSPACE = "/tmp/clawc-test-ws"
 REQDIR = "/tmp/clawc-test-reqs"
-os.makedirs(REQDIR, exist_ok=True)
 _counter = [0]
 SELF_PORT = [8873]  # own http port, for fetch_url test
 
 
 def save_request(body_bytes):
+    os.makedirs(REQDIR, exist_ok=True)
     _counter[0] += 1
     with open(os.path.join(REQDIR, "req-%d.json" % _counter[0]), "wb") as f:
         f.write(body_bytes)
@@ -84,12 +88,12 @@ def tool_results_anthropic(msgs):
 
 def llm_tool_for(ut):
     """Map user text to the tool call the mock LLM should emit."""
-    if "rm -rf /tmp/clawc-risky-test" in ut:
-        return "run_shell", {"command": "rm -rf /tmp/clawc-risky-test"}
+    if f"rm -rf {RISKY}" in ut:
+        return "run_shell", {"command": f"rm -rf {RISKY}"}
     if "use-remember" in ut:
         return "remember", {"fact": "pizza is the favorite food"}
     if "use-jail-rawsys" in ut:
-        return "run_shell", {"command": "/tmp/clawc-rawsys-escape"}
+        return "run_shell", {"command": f"{RAW_ESCAPE} {CANARY}"}
     if "use-sandbox-symlink-out" in ut:
         return "write_file", {"path": "link-out/evil", "content": "x"}
     if "use-sandbox-symlink-in" in ut:
@@ -142,9 +146,9 @@ def llm_tool_for(ut):
     if "use-bad-args" in ut:
         return "run_shell", "__RAW__{\"command\":"
     if "use-landlock-escape" in ut:
-        return "run_shell", {"command": "echo pwned > /home/user/landlock-canary"}
+        return "run_shell", {"command": f"echo pwned > {CANARY}"}
     if "use-landlock-write" in ut:
-        return "run_shell", {"command": "echo landlock-ok > /tmp/clawc-test-ws/landlock-canary2"}
+        return "run_shell", {"command": f"echo landlock-ok > {WORKSPACE}/landlock-canary2"}
     if "say the word mango" in ut:
         return "run_shell", {"command": "echo mango-delivered"}
     return "run_shell", {"command": "echo hello-from-tool"}
@@ -160,7 +164,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client exited while a test server was being shut down
 
     def do_GET(self):
         tg = re.match(r"^/bot([^/]+)/getMe$", self.path)
@@ -259,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
                           self.mx_event(room, "missing matrix", None),
                           self.mx_event(room, "hello matrix")]
                 else:
-                    ev = [self.mx_event(room, "run the command rm -rf /tmp/clawc-risky-test now")]
+                    ev = [self.mx_event(room, f"run the command rm -rf {RISKY} now")]
                 self._send({"next_batch": "s1", "rooms": {"join": {room: {"timeline": {"events": ev}}}}})
             elif since == "s1" and tok != "MXAUTH":
                 def reply(sender, body, ref=True):
@@ -332,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send({"choices": [{"message": {"role": "assistant", "content": None,
                         "tool_calls": calls}}]})
             return
-        if "HEARTBEAT" in ut and "rm -rf /tmp/clawc-risky-test" not in ut:
+        if "HEARTBEAT" in ut and f"rm -rf {RISKY}" not in ut:
             self._send({"choices": [{"message": {"role": "assistant", "content": "HEARTBEAT_OK"}}]})
             return
         name, args = llm_tool_for(ut)
@@ -392,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             else: self.tg_empty()
         elif token in ("TGOTHERBTN", "TGOTHERTEXT", "TGSTALETEXT"):
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 777)
+                msg(100, f"run the command rm -rf {RISKY} now", 777)
             elif off == 101:
                 if token == "TGOTHERBTN":
                     self.callback(101, 777, "conf:yes", sender=778)
@@ -406,21 +413,21 @@ class Handler(BaseHTTPRequestHandler):
             else: self.tg_empty()
         elif token == "CONFIRMTOKEN":
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 777)
+                msg(100, f"run the command rm -rf {RISKY} now", 777)
             elif off == 101:
                 self.callback(101, 777, "conf:yes")
             else:
                 self.tg_empty()
         elif token == "CONFIRMNOTOKEN":
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 888)
+                msg(100, f"run the command rm -rf {RISKY} now", 888)
             elif off == 101:
                 self.callback(101, 888, "conf:no")
             else:
                 self.tg_empty()
         elif token == "CONFIRMSTALETOKEN":
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 666)
+                msg(100, f"run the command rm -rf {RISKY} now", 666)
             elif off == 101:
                 self._send({"ok": True, "result": [{
                     "update_id": 101,
@@ -477,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.tg_empty()
         elif token == "CONFIRMNOMIDTOKEN":
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 444)
+                msg(100, f"run the command rm -rf {RISKY} now", 444)
             elif off == 101:
                 self._send({"ok": True, "result": [{
                     "update_id": 101,
@@ -490,7 +497,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.tg_empty()
         elif token == "CONFIRMTEXTTOKEN":
             if off == 0:
-                msg(100, "run the command rm -rf /tmp/clawc-risky-test now", 999)
+                msg(100, f"run the command rm -rf {RISKY} now", 999)
             elif off == 101:
                 msg(101, "/yes", 999)
             else:
@@ -543,7 +550,22 @@ class WsGateway(threading.Thread):
 
     def __init__(self, port):
         super().__init__()
-        self.port = port
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listener.bind(("127.0.0.1", port))
+        self.listener.listen(8)
+        self.listener.settimeout(0.2)
+        self.port = self.listener.getsockname()[1]
+        self.stopped = threading.Event()
+        self.clients = []
+        self.events_sent = threading.Event()
+
+    def close(self):
+        self.stopped.set()
+        self.join(timeout=3)
+        self.listener.close()
+        for client in self.clients:
+            client.join(timeout=3)
 
     @staticmethod
     def frame(payload, opcode=1):
@@ -647,7 +669,7 @@ class WsGateway(threading.Thread):
                 if tok in ("DCOTHERBTN", "DCOTHERTEXT", "DCSTALETEXT", "DCTEXTYES"):
                     conn.sendall(self.frame(json.dumps({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": {
                         "id": "419430400", "channel_id": "111", "guild_id": "g1",
-                        "content": "run the command rm -rf /tmp/clawc-risky-test now", "author": {"id": "u1"}}})))
+                        "content": f"run the command rm -rf {RISKY} now", "author": {"id": "u1"}}})))
                     import time as _t
                     _t.sleep(2)
                     if tok == "DCOTHERBTN":
@@ -667,8 +689,8 @@ class WsGateway(threading.Thread):
                               "message": {"id": "423624704"}}
                         conn.sendall(self.frame(json.dumps({"op": 0, "s": 4, "t": "INTERACTION_CREATE", "d": ev})))
                 if tok in ("DCMEDIA", "DCMEDIA2"):
-                    # self.port is the WS port; the HTTP mock listens 100 below
-                    base = "http://127.0.0.1:%d/cdn/" % (self.port - 100)
+                    # HTTP and WebSocket listeners may use independently allocated ports.
+                    base = "http://127.0.0.1:%d/cdn/" % SELF_PORT[0]
                     if tok == "DCMEDIA":
                         d = {"channel_id": "111",
                              "content": "what is this picture please",
@@ -693,13 +715,14 @@ class WsGateway(threading.Thread):
                     conn.sendall(self.frame(json.dumps(
                         {"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": d})))
                 if tok in ("DCTEST", "DCBOT", "DCFLOW", "DCSTALE"):
-                    content = ("run the command rm -rf /tmp/clawc-risky-test now"
+                    content = (f"run the command rm -rf {RISKY} now"
                                if tok not in ("DCTEST", "DCBOT") else "hello discord")
                     conn.sendall(self.frame(json.dumps(
                         {"op": 0, "s": 2, "t": "MESSAGE_CREATE",
                          "d": {"channel_id": "111", "content": content,
                                "guild_id": "g1",
                                "author": {"id": "u1", "bot": tok == "DCBOT"}}})))
+                    self.events_sent.set()
                 if tok == "DCFLOW":
                     import time as _t
                     _t.sleep(3)
@@ -733,18 +756,20 @@ class WsGateway(threading.Thread):
                                "data": {"name": "claw", "options":
                                         [{"name": "task", "value": "say the word mango"}]},
                                "channel_id": "111", "user": {"id": "u1"}}})))
+                    self.events_sent.set()
             elif m_op == 1:  # heartbeat
                 conn.sendall(self.frame('{"op":11,"d":null}'))
         conn.close()
 
     def run(self):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", self.port))
-        srv.listen(8)
-        while True:
-            conn, _ = srv.accept()
-            threading.Thread(target=self.handle, args=(conn,), daemon=True).start()
+        while not self.stopped.is_set():
+            try:
+                conn, _ = self.listener.accept()
+            except socket.timeout:
+                continue
+            client = threading.Thread(target=self.handle, args=(conn,), daemon=True)
+            self.clients.append(client)
+            client.start()
 
 
 if __name__ == "__main__":
