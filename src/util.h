@@ -16,6 +16,7 @@ typedef struct {
 void *xmalloc(size_t n);
 void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
+char *xstrdup0(const char *s);  /* NULL-safe: NULL -> "" */
 
 void buf_init(Buf *b);
 void buf_free(Buf *b);

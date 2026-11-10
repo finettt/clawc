@@ -74,6 +74,7 @@ void cfg_init(Cfg *c) {
     c->serve_tls = c->a2a_tls = 1;
 #endif
     c->serve_port = -1;
+    c->serve_workers = 8;
     c->hb_interval = -1;
     c->autonomous_interval = -1;
     for (i = 0; i < CK_COUNT; i++) c->src[i] = D;

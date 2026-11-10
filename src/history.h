@@ -10,10 +10,13 @@
 int hist_load(const char *path, Msg **out, int *nout);
 
 /* Append one message as a single JSON line (creates file/dir as needed). */
-void hist_append(const char *path, const Msg *m);
+int  hist_append(const char *path, const Msg *m);
 
 /* Truncate (clear) a history file. */
-void hist_truncate(const char *path);
+int  hist_truncate(const char *path);
+
+/* Rewrite the whole log with n messages (truncates unless flag!=0). 0 on ok. */
+int hist_write(const char *path, const Msg *msgs, int n, int flag);
 
 /* Append an audit record: ts, session, tool, args, result (truncated). */
 void audit_log(const char *workspace, const char *session, const char *tool,

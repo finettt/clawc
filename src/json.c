@@ -251,6 +251,12 @@ void json_quote(Buf *out, const char *s) {
     buf_puts(out, "\"");
 }
 
+void json_append_quoted(Buf *out, const char *key, const char *val) {
+    buf_puts(out, key);
+    json_quote(out, val ? val : "");
+}
+
+
 void json_dump(const JVal *v, Buf *out) {
     int i;
     if (!v) { buf_puts(out, "null"); return; }

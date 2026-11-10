@@ -33,6 +33,9 @@ char *xstrdup(const char *s) {
     memcpy(p, s, n);
     return p;
 }
+char *xstrdup0(const char *s) {
+    return s ? xstrdup(s) : xstrdup("");
+}
 
 void buf_init(Buf *b) {
     b->cap = 256;

@@ -129,21 +129,38 @@ int hist_load(const char *path, Msg **out, int *nout) {
     return 0;
 }
 
-void hist_append(const char *path, const Msg *m) {
+int hist_append(const char *path, const Msg *m) {
     ensure_dir_for(path);
     FILE *f = fopen(path, "ab");
-    if (!f) return;
+    if (!f) return -1;
     Buf b;
     buf_init(&b);
     msg_to_json(m, &b);
-    fwrite(b.s, 1, b.len, f);
-    fclose(f);
+    int ok = fwrite(b.s, 1, b.len, f) == b.len;
     buf_free(&b);
+    return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 
-void hist_truncate(const char *path) {
+int hist_truncate(const char *path) {
     FILE *f = fopen(path, "wb");
-    if (f) fclose(f);
+    if (!f) return -1;
+    return fclose(f) == 0 ? 0 : -1;
+}
+
+int hist_write(const char *path, const Msg *msgs, int n, int flag) {
+    ensure_dir_for(path);
+    FILE *f = fopen(path, flag ? "ab" : "wb");
+    if (!f) return -1;
+    int ok = 1;
+    for (int i = 0; i < n; i++) {
+        Buf b;
+        buf_init(&b);
+        msg_to_json(&msgs[i], &b);
+        if (fwrite(b.s, 1, b.len, f) != b.len) ok = 0;
+        buf_free(&b);
+    }
+    if (fclose(f) != 0) ok = 0;
+    return ok ? 0 : -1;
 }
 
 void audit_log(const char *workspace, const char *session, const char *tool,
