@@ -251,6 +251,8 @@ void json_quote(Buf *out, const char *s) {
     buf_puts(out, "\"");
 }
 
+/* Append an already-keyed fragment: writes key verbatim, then val quoted.
+   val NULL is treated as "". e.g. key="{\"to\":" then val="bob" yields {"to":"bob". */
 void json_append_quoted(Buf *out, const char *key, const char *val) {
     buf_puts(out, key);
     json_quote(out, val ? val : "");

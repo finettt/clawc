@@ -33,6 +33,7 @@ char *xstrdup(const char *s) {
     memcpy(p, s, n);
     return p;
 }
+/* Like xstrdup but treats NULL as "" instead of crashing. */
 char *xstrdup0(const char *s) {
     return s ? xstrdup(s) : xstrdup("");
 }

@@ -29,7 +29,7 @@ double    json_get_num(const JVal *o, const char *key, double dflt);
 
 /* Writer helpers */
 void json_quote(Buf *out, const char *s);   /* writes "escaped" including quotes */
-void json_append_quoted(Buf *out, const char *key, const char *val);
+void json_append_quoted(Buf *out, const char *key, const char *val); /* key verbatim, then val quoted */
 void json_dump(const JVal *v, Buf *out);    /* serialize subtree */
 
 #endif

@@ -148,6 +148,7 @@ int hist_truncate(const char *path) {
 }
 
 int hist_write(const char *path, const Msg *msgs, int n, int flag) {
+    /* Flush n messages at once; used when the log is compacted. */
     ensure_dir_for(path);
     FILE *f = fopen(path, flag ? "ab" : "wb");
     if (!f) return -1;
