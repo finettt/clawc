@@ -249,11 +249,25 @@ static HttpResp *http_post_raw(const char *method, const char *scheme, const cha
 static HttpResp *http_post_curl(const char *method, const char *url,
                                 const char *const *headers, int nheaders,
                                 const char *body, int timeout_s, int insecure) {
-    char body_path[] = "/tmp/clawc-req-XXXXXX";
-    char out_path[] = "/tmp/clawc-resp-XXXXXX";
-    int bfd = mkstemp(body_path);
-    int ofd = mkstemp(out_path);
-    if (bfd < 0 || ofd < 0) return resp_err("mkstemp failed");
+    /* request/response temp files live in a writable temp dir: honor $TMPDIR,
+       then /tmp (preserves prior behavior), then $HOME as a last resort so
+       builds without a writable /tmp (e.g. Android) still work. */
+    const char *dirs[3] = { getenv("TMPDIR"), "/tmp", getenv("HOME") };
+    char body_path[512], out_path[512];
+    int bfd = -1, ofd = -1;
+    int di;
+    for (di = 0; di < 3; di++) {
+        if (!dirs[di] || !dirs[di][0]) continue;
+        snprintf(body_path, sizeof body_path, "%s/clawc-req-XXXXXX", dirs[di]);
+        snprintf(out_path,  sizeof out_path,  "%s/clawc-resp-XXXXXX", dirs[di]);
+        bfd = mkstemp(body_path);
+        ofd = mkstemp(out_path);
+        if (bfd >= 0 && ofd >= 0) break;
+        if (bfd >= 0) { unlink(body_path); close(bfd); }
+        if (ofd >= 0) { unlink(out_path); close(ofd); }
+        bfd = ofd = -1;
+    }
+    if (bfd < 0 || ofd < 0) return resp_err("mkstemp failed (no writable temp dir)");
     if (body) {
         size_t blen = strlen(body);
         if ((size_t)write(bfd, body, blen) != blen) {
