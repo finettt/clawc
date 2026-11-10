@@ -1212,10 +1212,20 @@ static int cmd_setup(const char *path, int insecure) {
     buf_init(&tok); buf_init(&allow); buf_init(&users); buf_init(&port); buf_init(&hb); buf_init(&yes);
 
     printf("clawc setup - Enter keeps default\n\n");
-    ask_line("workspace", getenv("CLAWC_WORKSPACE"), &ws);
-    ask_line("API base url (/v1)", getenv("CLAWC_API_URL"), &url);
+    {
+        char *ws_def = default_workspace();
+        ask_line("workspace", ws_def, &ws);
+        free(ws_def);
+    }
+    {
+        const char *env = getenv("CLAWC_API_URL");
+        ask_line("API base url (/v1)", env && env[0] ? env : "https://api.openai.com/v1", &url);
+    }
     normalize_api_url(&url);
-    ask_line("model", getenv("CLAWC_MODEL"), &model);
+    {
+        const char *env = getenv("CLAWC_MODEL");
+        ask_line("model", env && env[0] ? env : "gpt-4o", &model);
+    }
     ask_line("API key", getenv("CLAWC_API_KEY"), &key);
 #ifndef CLAWC_NO_TELEGRAM
     ask_line("Telegram bot token (optional)", getenv("CLAWC_TELEGRAM_TOKEN"), &tok);
