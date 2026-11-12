@@ -31,6 +31,7 @@
     X("telegram_users", CK_TG_USERS) \
     X("telegram_poll", CK_TG_POLL) \
     X("serve_port", CK_SERVE_PORT) \
+    X("serve_workers", CK_SERVE_WORKERS) \
     X("serve_bind", CK_SERVE_BIND) \
     X("context_chars", CK_CONTEXT_CHARS) \
     X("heartbeat_interval", CK_HB_INTERVAL) \
@@ -167,6 +168,7 @@ void cfg_set_int(Cfg *c, int key, long v, const char *src) {
     case CK_TIMEOUT:     c->timeout = (int)v; break;
     case CK_TG_POLL:     c->tg_poll = (int)v; break;
     case CK_SERVE_PORT:  c->serve_port = (int)v; break;
+    case CK_SERVE_WORKERS: c->serve_workers = (int)v; break;
     case CK_CONTEXT_CHARS: c->context_chars = (int)v; break;
     case CK_HB_INTERVAL: c->hb_interval = (int)v; break;
     case CK_AUTONOMOUS: c->autonomous_interval = (int)v; break;
@@ -238,6 +240,7 @@ static int cfg_apply(Cfg *c, int key, const char *val, const char *src) {
     case CK_TIMEOUT:
     case CK_TG_POLL:
     case CK_SERVE_PORT:
+    case CK_SERVE_WORKERS:
     case CK_CONTEXT_CHARS:
     case CK_HB_INTERVAL:
     case CK_AUTONOMOUS:
@@ -365,6 +368,7 @@ void cfg_load_env(Cfg *c) {
     env_str(c, CK_TG_USERS, "CLAWC_TELEGRAM_USERS");
     env_int(c, CK_TG_POLL, "CLAWC_TELEGRAM_POLL");
     env_int(c, CK_SERVE_PORT, "CLAWC_SERVE_PORT");
+    env_int(c, CK_SERVE_WORKERS, "CLAWC_SERVE_WORKERS");
     env_str(c, CK_SERVE_BIND, "CLAWC_SERVE_BIND");
 #ifndef CLAWC_NO_MATRIX
     env_str(c, CK_MX_HS, "CLAWC_MATRIX_HOMESERVER");
@@ -511,6 +515,7 @@ void cfg_dump(const Cfg *c, FILE *f) {
     fprintf(f, "telegram_poll: %d (%s)\n", c->tg_poll, c->src[CK_TG_POLL]);
 #ifndef CLAWC_NO_SERVE
     dump_int(c, f, CK_SERVE_PORT, "serve_port", c->serve_port);
+    dump_int(c, f, CK_SERVE_WORKERS, "serve_workers", c->serve_workers);
 #endif
 #ifndef CLAWC_NO_SERVE
     dump_str(c, f, CK_SERVE_BIND, "serve_bind", "(127.0.0.1)");
