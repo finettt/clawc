@@ -2,6 +2,7 @@
  *
  *  - Linux:   Landlock LSM (the original backend).
  *  - macOS:   sandbox_init(3) seatbelt profile, equivalent semantics.
+ *             macOS only: iOS and the other Apple targets get no backend.
  *  - OpenBSD: unveil(2) + pledge(2), equivalent semantics.
  *  - others:  no backend.  sandbox_available() returns 0 and callers
  *             HARD-REFUSE to run with "sandbox": "os" (see sandbox.h) -
@@ -13,9 +14,13 @@
 #define _GNU_SOURCE /* syscall(), O_PATH */
 #include "sandbox.h"
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #if !defined(CLAWC_SANDBOX_STUBS) && defined(__linux__)
 #define SB_LANDLOCK 1
-#elif !defined(CLAWC_SANDBOX_STUBS) && defined(__APPLE__)
+#elif !defined(CLAWC_SANDBOX_STUBS) && defined(__APPLE__) && !TARGET_OS_IPHONE
 #define SB_APPLE 1
 #elif !defined(CLAWC_SANDBOX_STUBS) && defined(__OpenBSD__)
 #define SB_OPENBSD 1
@@ -165,7 +170,7 @@ int sandbox_apply(const char *ws)
     if (n < 0 || n >= (int)sizeof(profile)) return -1;
 
     if (sandbox_init(profile, 0, &err) != 0) {
-        if (err) sandbox_free(err);
+        if (err) sandbox_free_error(err);
         return -1;
     }
     return 0;

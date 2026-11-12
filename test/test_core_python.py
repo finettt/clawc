@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,7 +138,7 @@ class PackedTextTests(unittest.TestCase):
 
 
 class PublicFunctionTests(unittest.TestCase):
-    """ABI tests for xstrdup0 (util.c) and json_append_quoted (json.c)."""
+    """ABI tests for xstrdup0, now_ms (util.c) and json_append_quoted (json.c)."""
 
     class Buf(ctypes.Structure):
         _fields_ = [("s", ctypes.c_char_p),
@@ -164,6 +165,15 @@ class PublicFunctionTests(unittest.TestCase):
         cls.lib.buf_free.restype = None
         cls.lib.json_append_quoted.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
         cls.lib.json_append_quoted.restype = None
+        cls.lib.now_ms.restype = ctypes.c_longlong
+
+    def test_now_ms_is_monotonic_milliseconds(self):
+        first = self.lib.now_ms()
+        time.sleep(0.05)
+        second = self.lib.now_ms()
+        self.assertGreaterEqual(first, 0)
+        self.assertGreaterEqual(second - first, 40)
+        self.assertLess(second - first, 5000)
 
     def test_xstrdup0_null_becomes_empty(self):
         # xstrdup0(NULL) must return a non-NULL pointer to an empty string.

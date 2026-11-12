@@ -14,6 +14,9 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/mach_time.h>
+#endif
 
 void *xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
@@ -248,6 +251,20 @@ const char *err_str(int e) {
     case 110: return "connection timed out";           /* ETIMEDOUT */
     default: return "error";
     }
+}
+
+/* Apple gained clock_gettime() only in macOS 10.12 / iOS 10; the Mach clock
+   exists on every release. */
+long long now_ms(void) {
+#ifdef __APPLE__
+    mach_timebase_info_data_t tb;
+    if (mach_timebase_info(&tb) != 0 || !tb.denom) return -1;
+    return (long long)(mach_absolute_time() * tb.numer / tb.denom / 1000000);
+#else
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) return -1;
+    return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+#endif
 }
 
 void stamp_fmt(char *dst, int n, const char *fmt, const struct tm *t) {

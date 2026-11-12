@@ -8,7 +8,7 @@
  *             in the workspace, /tmp (/private/tmp) and /dev.  Full network
  *             access - the LLM traffic lives there.
  *   OpenBSD - unveil(2) path map + pledge(2) syscall set: same policy.
- *   others  - no backend exists (Windows, FreeBSD, exotic POSIX).
+ *   others  - no backend exists (Windows, FreeBSD, iOS, exotic POSIX).
  *
  * Policy (main.c enforces it): when OS confinement is requested
  * ("sandbox": "os", alias "landlock", or CLAWC_SANDBOX=os), a missing or

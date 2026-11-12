@@ -90,10 +90,15 @@ endif
 TLS_PLT_TUNE := $(shell printf '' | $(BUILD_CC) -Werror -fno-plt -x c -c -o /dev/null - >/dev/null 2>&1 && echo -fno-plt)
 endif
 
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
+# OS-specific tweaks. Apple targets use the Mach-O linker (the GNU flags break
+# it); sandbox_init lives in libSystem, so no extra library. The OS is the one
+# the compiler targets (its triple), so cross builds get the right flags;
+# compilers without a triple fall back to the host.
+TRIPLE    := $(shell $(BUILD_CC) -dumpmachine 2>/dev/null)
+TARGET_OS := $(if $(findstring -apple-,$(TRIPLE)),Darwin,$(if $(findstring linux,$(TRIPLE)),Linux,$(shell uname -s)))
+ifeq ($(TARGET_OS),Darwin)
 LDFLAGS   = -Wl,-dead_strip
-LDLIBS    = -lsandbox
+LDLIBS    =
 LINK_STRIP :=
 MINISTRIP := 0
 endif
@@ -108,7 +113,7 @@ endif
 
 ifeq ($(HARDEN),1)
 CFLAGS  += -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat=2 -Wformat-security
-ifneq ($(UNAME_S),Darwin)
+ifneq ($(TARGET_OS),Darwin)
 LDFLAGS += -Wl,-z,relro,-z,now
 endif
 endif
@@ -116,8 +121,8 @@ endif
 SIZE_LTO ?= auto
 ifeq ($(IS_DEBUG),)
 ifneq ($(SIZE_LTO),0)
-ifeq ($(UNAME_S),Linux)
-ifneq ($(filter x86_64%,$(shell $(BUILD_CC) -dumpmachine 2>/dev/null)),)
+ifeq ($(TARGET_OS),Linux)
+ifneq ($(filter x86_64%,$(TRIPLE)),)
 SIZE_LTO_OK := $(shell tmp=".lto-probe.$$$$"; trap 'rm -f "$$tmp"' 0; \
 	printf 'int main(void){return 0;}\n' | $(BUILD_CC) -std=c99 -flto \
 	-fno-ipa-cp -fno-ipa-sra -x c - $(LDFLAGS) -o "$$tmp" >/dev/null 2>&1 && echo yes)
@@ -167,7 +172,7 @@ $(BIN): $(SRC) $(HDR) $(BIN).flags tools/ministrip.c tools/jaild.c tools/jailshi
 	@set -e; obj="$@.bridge_tls.o"; trap 'rm -f "$$obj"' 0; \
 	  $(BUILD_CC) $(CFLAGS) $(TLS_PLT_TUNE) -c src/bridge_tls.c -o "$$obj"; \
 	  $(BUILD_CC) $(CFLAGS) -o $@ $(filter-out src/bridge_tls.c,$(SRC)) "$$obj" $(LDFLAGS) $(LDLIBS) $(LINK_STRIP)
-ifeq ($(UNAME_S),Darwin)
+ifeq ($(TARGET_OS),Darwin)
 	$(if $(IS_DEBUG),,$(STRIP) $@)
 endif
 ifeq ($(MINISTRIP),1)

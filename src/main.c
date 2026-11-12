@@ -1,6 +1,7 @@
 /* clawc - main.c: CLI, config resolution, chat, heartbeat, daemon supervisor,
    TCP bridge server. */
 #define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE /* O_NOFOLLOW: Apple headers hide it from strict POSIX */
 #include "packed_text.h"
 #include "agent.h"
 #include "swarm.h"
@@ -87,16 +88,13 @@ static void ws_write_if_missing(const char *ws, const char *name, const char *co
     free(path);
 }
 
+static int ensure_parent_dir(const char *path);
+
 static void cmd_init(const char *ws) {
-    char cmd[4096];
-    snprintf(cmd, sizeof cmd, "mkdir -p '%s/skills'", ws);
-    if (system(cmd) != 0) {
-        /* fallback: try workspace itself via proc-less mkdir */
-        mkdir(ws, 0755);
-        char *sk = path_join(ws, "skills");
-        mkdir(sk, 0755);
-        free(sk);
-    }
+    /* mkdir -p without a shell: no quoting of ws, no system(3) dependency */
+    char *sk = path_join(ws, "skills/example");
+    if (ensure_parent_dir(sk) == 0) mkdir(sk, 0755);
+    free(sk);
     ws_write_if_missing(ws, "SOUL.md",
         packed_text(TXT_EXTRA_00));
     ws_write_if_missing(ws, "MEMORY.md", "# Memory\n");
@@ -106,11 +104,6 @@ static void cmd_init(const char *ws) {
         packed_text(TXT_EXTRA_02));
     ws_write_if_missing(ws, "HEARTBEAT.md",
         packed_text(TXT_EXTRA_03));
-    char *p = path_join(ws, "skills");
-    char *sk = path_join(p, "example");
-    mkdir(sk, 0755);
-    free(sk);
-    free(p);
     ws_write_if_missing(ws, "skills/example/SKILL.md",
         packed_text(TXT_EXTRA_04));
     printf("workspace ready: %s\n", ws);
@@ -442,15 +435,14 @@ static void serve_client(App *app, BridgeTlsCtx *tlsctx, int c) {
         buf_init(&line);
         char ch;
         int complete = 0;
-        struct timespec start, now;
-        if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+        long long start = now_ms(), now;
+        if (start < 0) {
             bridge_tls_free(conn); close(c); buf_free(&line); return;
         }
         for (;;) {
             struct pollfd pfd = { c, POLLIN, 0 };
-            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) break;
-            long long elapsed = (now.tv_sec - start.tv_sec) * 1000LL +
-                                (now.tv_nsec - start.tv_nsec) / 1000000LL;
+            if ((now = now_ms()) < 0) break;
+            long long elapsed = now - start;
             if (elapsed >= 5000) break; /* absolute deadline, even for trickle input */
             if (conn) {
                 if (bridge_tls_read(conn, &ch, 1, (int)((5999 - elapsed) / 1000)) != 1) break;
@@ -771,11 +763,9 @@ static int cmd_doctor(App *app) {
         in.role = (char *)"user";
         in.content = (char *)"reply with the single word: pong";
         char *err = NULL;
-        struct timespec t0, t1;
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        long long t0 = now_ms();
         int rc = llm_chat(&app->agent.llm, &in, 1, &out, &err, NULL, NULL);
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-        long ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+        long ms = (long)(now_ms() - t0);
         if (rc == 0) {
             printf("  [llm]       ok  %s %s (%ldms)\n",
                    app->agent.llm.api_url,

@@ -94,6 +94,14 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue((self.ws / 'SOUL.md').is_file())
         self.assertTrue((self.ws / 'MEMORY.md').is_file())
 
+    def test_init_creates_nested_workspace_without_shell(self):
+        ws = Path(self.tmp.name) / "it's" / 'deep' / 'ws'
+        p = subprocess.run([str(self.binary), '-w', str(ws), 'init'], cwd=ROOT,
+                           env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual((p.returncode, p.stderr), (0, ''))
+        self.assertTrue((ws / 'SOUL.md').is_file())
+        self.assertTrue((ws / 'skills' / 'example' / 'SKILL.md').is_file())
+
     def test_openai_tool_round_trip(self):
         p = self.agent('run', 'please run the tool')
         self.assertEqual(p.returncode, 0, p.stderr)

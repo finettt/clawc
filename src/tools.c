@@ -1,5 +1,6 @@
 /* clawc - tools.c */
 #define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE /* O_NOFOLLOW: Apple headers hide it from strict POSIX */
 #include "tools.h"
 
 #include <dirent.h>

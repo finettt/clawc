@@ -51,11 +51,39 @@ make CROSS=riscv64-linux-gnu TLS=1   # RISC-V 64 (VisionFive, QEMU, HiFive) -> b
 make CROSS=i686-linux-gnu TLS=1      # x86 32-bit -> build/i686-linux-gnu/clawc
 ```
 
+A `CROSS=<triple>` build expects a `<triple>-gcc` toolchain. Any other cross
+compiler (for example clang with `-target`) goes in `CC` for the default
+target; the OS-specific linker flags follow the compiler's target triple, not
+the build host.
+
 For a fully static single-file binary (musl; pair with static OpenSSL or `TLS=0`):
 
 ```sh
 make TOOLCHAIN=musl # musl-gcc -> build/native-musl/clawc (static)
 ```
+
+### iOS (jailbroken, arm64)
+
+On a jailbroken device `clawc` runs as an ordinary command-line tool. Build it
+with a compiler that targets iOS (the version in `-target` is the oldest iOS
+the binary has to run on), then fake-sign it, since a jailbreak still only runs
+signed binaries:
+
+```sh
+make CC="clang -target arm64-apple-ios12.0 -isysroot /path/to/iPhoneOS.sdk -fuse-ld=lld" \
+     TLS=0 STRIP=llvm-strip
+ldid -Sentitlements.xml build/native/clawc   # platform-application, com.apple.private.security.no-container
+```
+
+- `TLS=0` needs `curl` on the device. For built-in TLS add the `-I`/`-L` paths
+  of an OpenSSL built for iOS to `CC` and pass `TLS=1`; a static OpenSSL keeps
+  the binary independent of the bootstrap's libraries.
+- iOS ships no PEM trust store: point `SSL_CERT_FILE` at a CA bundle (for
+  example curl's `cacert.pem`), otherwise `https://` fails certificate
+  verification.
+- iOS has no OS sandbox backend: `"sandbox": "os"` runs the announced
+  best-effort fallback (see [setup.md](setup.md)). The jail shim and `jaild`
+  are Linux extras, so the two `[make] ... skipped` lines are expected.
 
 ## Running as a service
 

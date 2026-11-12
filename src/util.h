@@ -30,6 +30,7 @@ const char *err_str(int e);              /* strerror without the tables */
 void stamp_fmt(char *dst, int n, const char *fmt, const struct tm *t); /* strftime-lite */
 int scan_hhmm(const char *s, int *hh, int *mm);   /* "HH:MM" -> 0 ok */
 double scan_num(const char **p);         /* strtod-lite for JSON numbers */
+long long now_ms(void);                  /* monotonic clock in ms, -1 on failure */
 /* atomic text cursor persistence (channels): tmp + rename */
 void cursor_save(const char *path, const char *value);
 char *cursor_load(const char *path);     /* malloc'd or NULL */

@@ -1,6 +1,7 @@
 /* Encrypted transport for the authenticated bridge. No implicit fallback. */
 #define _POSIX_C_SOURCE 200809L
 #include "bridge_tls.h"
+#include "util.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
@@ -28,11 +29,6 @@ int bridge_loopback(const struct sockaddr *sa) {
 struct BridgeTlsCtx { SSL_CTX *ctx; };
 struct BridgeTls { SSL *ssl; SSL_CTX *owned_ctx; int fd; };
 
-static long long now_ms(void) {
-    struct timespec t;
-    if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) return -1;
-    return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
-}
 static int wait_ssl(BridgeTls *c, int result, long long end) {
     int e = SSL_get_error(c->ssl, result);
     short events = e == SSL_ERROR_WANT_READ ? POLLIN : e == SSL_ERROR_WANT_WRITE ? POLLOUT : 0;
