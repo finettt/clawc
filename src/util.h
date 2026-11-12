@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <time.h>
 
-#define CLAWC_VERSION "0.3.0"
+#define CLAWC_VERSION "0.4.0"
 
 typedef struct {
     char *s;      /* NUL-terminated data */
