@@ -104,6 +104,9 @@ static char *parse_string_raw(Parser *ps) { /* ps->p at opening quote */
                         ps->p += 6;
                     }
                 }
+                /* An embedded NUL cannot live in the returned C string: it would
+                   silently truncate the value. Reject it instead. */
+                if (cp == 0) { buf_free(&b); return NULL; }
                 utf8_encode(&b, cp);
                 break;
             }
