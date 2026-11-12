@@ -20,6 +20,7 @@
 #include "json.h"
 #include "telegram.h"
 #include "http.h"
+#include "net.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -853,6 +854,27 @@ static int cmd_doctor(App *app) {
     else
         fputs(packed_text(TXT_STDOUT_01), stdout);
 
+    /* net: prove the tunnel works, not just that a string is set. A proxy that
+     * accepts connections but cannot reach the origin is the usual failure. */
+    if (net_proxy_active()) {
+        const char *probe_host = "api.telegram.org";
+        char *perr = NULL;
+        const char *via = NULL;
+        int pfd = net_connect(probe_host, "443", 10, &perr, &via);
+        if (pfd >= 0) {
+            close(pfd);
+            printf("  [net]       ok  %s (probe %s:443 via %s)\n",
+                   net_proxy_active(), probe_host, via ? via : "direct");
+        } else {
+            printf("  [net]       FAIL %s - %s\n", net_proxy_active(),
+                   perr ? perr : "probe failed");
+            free(perr);
+            fails++;
+        }
+    } else {
+        printf("  [net]       --  direct (set \"proxy\" or CLAWC_PROXY/HTTPS_PROXY)\n");
+    }
+
     /* cron */
 #ifndef CLAWC_NO_CRON
     {
@@ -1511,6 +1533,21 @@ int main(int argc, char **argv) {
     }
     cfg_load_env(&cfg);
     apply_cli(&cfg, &cli);
+
+    /* One place decides the route out. A malformed proxy is fatal: silently
+     * falling back to a direct connection would leak traffic the user believes
+     * is tunnelled. */
+    if (net_set_proxy(cfg.proxy, cfg.proxy_no) != 0) {
+        cfg_free(&cfg);
+        cli_free(&cli);
+        return 2;
+    }
+    if (net_proxy_active())
+        fprintf(stderr, "[net] proxy %s%s%s\n", net_proxy_active(),
+                cfg.proxy_no ? "; no_proxy " : "",
+                cfg.proxy_no ? cfg.proxy_no : "");
+    else if (cfg.proxy && cfg.proxy[0])
+        fprintf(stderr, "[net] proxy %s bypassed for this host\n", cfg.proxy);
 
     if (str_eq(cmd, "setup")) {
         const char *target = cli.cfg_path ? cli.cfg_path

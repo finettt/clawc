@@ -3,6 +3,7 @@
 #define _XOPEN_SOURCE 700
 #include "ws.h"
 #include "http.h"
+#include "net.h"
 
 #include <fcntl.h>
 #include <netdb.h>
@@ -65,22 +66,13 @@ int ws_connect(WsConn *c, const char *url, int insecure, char **err) {
     }
     char portstr[16];
     snprintf(portstr, sizeof portstr, "%d", port);
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) {
-        if (err) *err = xstrdup("cannot resolve host");
-        return -1;
-    }
-    c->fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (c->fd < 0 || connect(c->fd, res->ai_addr, res->ai_addrlen) != 0) {
-        freeaddrinfo(res);
-        if (err) *err = xstrdup("connect failed");
+    /* net_connect handles the proxy, the send/recv timeouts, and trying every
+       address record (this used to use res->ai_addr only, with no timeout). */
+    c->fd = net_connect(host, portstr, 30, err, NULL);
+    if (c->fd < 0) {
         ws_close(c);
         return -1;
     }
-    freeaddrinfo(res);
 
     if (tls) {
         c->tls = tls_wrap(c->fd, host, insecure, err);

@@ -51,7 +51,9 @@
     X("discord_token", CK_DC_TOKEN) \
     X("discord_guilds", CK_DC_GUILDS) \
     X("discord_channels", CK_DC_CHANNELS) \
-    X("discord_users", CK_DC_USERS)
+    X("discord_users", CK_DC_USERS) \
+    X("proxy", CK_PROXY) \
+    X("proxy_no", CK_PROXY_NO)
 #define KEY_NAME(name, id) name "\0"
 static const char KEY_NAMES[] = CONFIG_KEYS(KEY_NAME);
 #undef KEY_NAME
@@ -95,6 +97,8 @@ void cfg_set_str(Cfg *c, int key, char *val, const char *src) {
     case CK_TG_ALLOW:   slot = &c->tg_allow; break;
     case CK_TG_USERS:   slot = &c->tg_users; break;
     case CK_SERVE_BIND: slot = &c->serve_bind; break;
+    case CK_PROXY:      slot = &c->proxy; break;
+    case CK_PROXY_NO:   slot = &c->proxy_no; break;
 #ifndef CLAWC_NO_MATRIX
     case CK_MX_HS:      slot = &c->mx_hs; break;
 #endif
@@ -148,7 +152,8 @@ void cfg_free(Cfg *c) {
                    &c->serve_cert, &c->serve_key, &c->a2a_ca, &c->a2a_peers, &c->bridge_token,
 #endif
                    &c->mx_hs, &c->mx_token, &c->mx_user, &c->mx_rooms, &c->mx_users, &c->dc_token,
-                   &c->dc_guilds, &c->dc_channels, &c->dc_users, &c->path };
+                   &c->dc_guilds, &c->dc_channels, &c->dc_users,
+                   &c->proxy, &c->proxy_no, &c->path };
     size_t i;
     for (i = 0; i < sizeof s / sizeof s[0]; i++) {
         free(*s[i]);
@@ -400,6 +405,18 @@ void cfg_load_env(Cfg *c) {
     env_int(c, CK_CONTEXT_CHARS, "CLAWC_CONTEXT_CHARS");
     env_int(c, CK_HB_INTERVAL, "CLAWC_HEARTBEAT_INTERVAL");
     env_int(c, CK_AUTONOMOUS, "CLAWC_AUTONOMOUS_INTERVAL");
+
+    /* proxy: config key > CLAWC_PROXY > HTTPS_PROXY > ALL_PROXY (curl-compatible).
+     * A malformed value is rejected later by net_set_proxy() rather than here,
+     * so the config dump still shows what was actually read. */
+    env_str(c, CK_PROXY, "CLAWC_PROXY");
+    if (!c->proxy || !c->proxy[0]) env_str(c, CK_PROXY, "HTTPS_PROXY");
+    if (!c->proxy || !c->proxy[0]) env_str(c, CK_PROXY, "https_proxy");
+    if (!c->proxy || !c->proxy[0]) env_str(c, CK_PROXY, "ALL_PROXY");
+    if (!c->proxy || !c->proxy[0]) env_str(c, CK_PROXY, "all_proxy");
+    env_str(c, CK_PROXY_NO, "CLAWC_PROXY_NO");
+    if (!c->proxy_no || !c->proxy_no[0]) env_str(c, CK_PROXY_NO, "NO_PROXY");
+    if (!c->proxy_no || !c->proxy_no[0]) env_str(c, CK_PROXY_NO, "no_proxy");
 }
 
 static void dump_str(const Cfg *c, FILE *f, int key, const char *label,
@@ -423,6 +440,8 @@ static void dump_str(const Cfg *c, FILE *f, int key, const char *label,
     case CK_DC_USERS:  v = c->dc_users; break;
 #endif
     case CK_SERVE_BIND: v = c->serve_bind; break;
+    case CK_PROXY:      v = c->proxy; break;
+    case CK_PROXY_NO:   v = c->proxy_no; break;
 #ifndef CLAWC_NO_SERVE
     case CK_A2A_PEERS: v = c->a2a_peers; break;
     case CK_SERVE_CERT: v = c->serve_cert; break;
@@ -472,6 +491,8 @@ void cfg_dump(const Cfg *c, FILE *f) {
     fprintf(f, "timeout: %d (%s)\n", c->timeout, c->src[CK_TIMEOUT]);
     dump_str(c, f, CK_SANDBOX, "sandbox", "(off)");
     fprintf(f, "insecure: %s (%s)\n", c->insecure ? "on" : "off", c->src[CK_INSECURE]);
+    dump_str(c, f, CK_PROXY, "proxy", "(direct)");
+    dump_str(c, f, CK_PROXY_NO, "proxy_no", "(none)");
     fprintf(f, "auto_approve: %s (%s)\n", c->auto_approve ? "on" : "off",
             c->src[CK_AUTO_APPROVE]);
     fprintf(f, "auto_learn: %s (%s)\n", c->auto_learn ? "on" : "off",

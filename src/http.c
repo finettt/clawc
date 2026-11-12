@@ -1,6 +1,7 @@
 /* clawc - http.c */
 #define _XOPEN_SOURCE 700
 #include "http.h"
+#include "net.h"
 #include "tls.h"
 
 #include <errno.h>
@@ -55,27 +56,6 @@ static int parse_url(const char *url, char **scheme, char **host, char **port, c
     }
     *path = xstrdup(slash ? slash : "/");
     return 0;
-}
-
-static int tcp_connect(const char *host, const char *port, int timeout_s) {
-    struct addrinfo hints, *res = NULL, *ai;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port, &hints, &res) != 0) return -1;
-    int fd = -1;
-    for (ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv = {timeout_s > 0 ? timeout_s : 60, 0};
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        close(fd);
-        fd = -1;
-    }
-    freeaddrinfo(res);
-    return fd;
 }
 
 static HttpResp *parse_http_response(Buf *raw) {
@@ -134,8 +114,13 @@ static HttpResp *http_post_raw(const char *method, const char *scheme, const cha
                                const char *port, const char *path, const char *const *headers,
                                int nheaders, const char *body, int timeout_s, int insecure,
                                HttpChunkCb on_chunk, void *chunk_user) {
-    int fd = tcp_connect(host, port, timeout_s);
-    if (fd < 0) return resp_err("connect failed");
+    char *conn_err = NULL;
+    int fd = net_connect(host, port, timeout_s, &conn_err, NULL);
+    if (fd < 0) {
+        HttpResp *e = resp_err(conn_err ? conn_err : "connect failed");
+        free(conn_err);
+        return e;
+    }
 
     int use_tls = str_eq(scheme, "https");
 #ifdef CLAWC_TLS

@@ -34,6 +34,7 @@ def main():
     # These scripts are already Python and remain separate until their cases
     # are refactored into unittest. Never suppress their failures.
     scripts = [(['test/ministrip_test.py'], 'ELF minimizer'),
+               (['test/proxy_python.py'], 'Proxy (CONNECT/SOCKS5)'),
                (['test/cli_config_test.py', binary], 'CLI configuration'),
                (['test/swarm_index_test.py', binary], 'Swarm index')]
     if not options.skip_harden and sys.platform.startswith('linux'):

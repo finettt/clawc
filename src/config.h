@@ -31,6 +31,7 @@ enum {
     CK_MX_HS, CK_MX_TOKEN, CK_MX_USER, CK_MX_ROOMS, CK_MX_USERS,
     CK_A2A_PEERS, CK_BRIDGE_TOKEN, CK_SERVE_TLS, CK_SERVE_CERT, CK_SERVE_KEY, CK_SERVE_WORKERS, CK_A2A_TLS, CK_A2A_CA,
     CK_DC_TOKEN, CK_DC_GUILDS, CK_DC_CHANNELS, CK_DC_USERS,
+    CK_PROXY, CK_PROXY_NO,
     CK_COUNT
 };
 
@@ -40,6 +41,7 @@ typedef struct {
     char *tg_token, *tg_api, *tg_allow, *tg_users, *serve_bind, *serve_cert, *serve_key, *a2a_ca;
     char *mx_hs, *mx_token, *mx_user, *mx_rooms, *mx_users, *a2a_peers, *bridge_token;
     char *dc_token, *dc_guilds, *dc_channels, *dc_users;
+    char *proxy, *proxy_no;
     /* ints: max_steps/timeout/tg_poll carry built-in defaults from cfg_init;
        serve_port/hb_interval use -1 = unset (disabled) */
     int max_steps, timeout, insecure, auto_approve, tg_poll, context_chars, auto_learn;
