@@ -21,6 +21,8 @@
 #   SIZE_LTO=auto|0         size-tuned LTO on x86-64 GCC         [auto]
 #   OUTDIR=build            build root
 #   TARGET=clawc            binary name; a value with '/' is used as a full path
+#   HOSTCC=cc               compiler for build-time tools (textpack/ministrip)
+#   STRIP=strip             post-link stripper; "true" disables it   [autodetect]
 #
 # Other verbs: test, test-asan, test-fuzz, test-fuzz-asan, size, clean, help.
 # Changing any variable rebuilds automatically (flags are tracked per binary).
@@ -31,8 +33,17 @@ TOOLCHAIN  ?= gnu
 BUILD_TYPE ?= release
 OUTDIR     ?= build
 TARGET     ?= clawc
-HOSTCC     ?= cc
-STRIP      ?= strip
+# Host-side build tools (tools/textpack.c, tools/ministrip.c) run on the build
+# machine, so they must never inherit the target compiler or its sysroot: a
+# cross compiler (CROSS=... or CC="clang -target ... -isysroot ...") cannot
+# produce a binary runnable here. Override HOSTCC= on device builds (iOS/Android)
+# where the host compiler needs its own sysroot.
+HOSTCC     ?= $(or $(CC_FOR_BUILD),cc)
+# A missing stripper must not fail an otherwise successful link. Apple and
+# jailbreak toolchains frequently ship no cctools/strip; llvm-strip works there.
+STRIP      ?= $(or $(shell command -v strip >/dev/null 2>&1 && echo strip),\
+                   $(shell command -v llvm-strip >/dev/null 2>&1 && echo llvm-strip),\
+                   true)
 
 ifneq ($(filter-out gnu musl,$(TOOLCHAIN)),)
 $(error TOOLCHAIN must be gnu or musl, got '$(TOOLCHAIN)')
@@ -173,14 +184,18 @@ $(BIN): $(SRC) $(HDR) $(BIN).flags tools/ministrip.c tools/jaild.c tools/jailshi
 	  $(BUILD_CC) $(CFLAGS) $(TLS_PLT_TUNE) -c src/bridge_tls.c -o "$$obj"; \
 	  $(BUILD_CC) $(CFLAGS) -o $@ $(filter-out src/bridge_tls.c,$(SRC)) "$$obj" $(LDFLAGS) $(LDLIBS) $(LINK_STRIP)
 ifeq ($(TARGET_OS),Darwin)
-	$(if $(IS_DEBUG),,$(STRIP) $@)
+	$(if $(IS_DEBUG),,@$(STRIP) $@ || true)
 endif
 ifeq ($(MINISTRIP),1)
 	@set -e; helper=".ministrip.$$$$"; trap 'rm -f "$$helper"' 0; \
 	  $(HOSTCC) -std=c99 -O -o "$$helper" tools/ministrip.c; ./"$$helper" "$@"
 endif
+ifneq ($(TARGET_OS),Linux)
+	@echo "[make] jail shim + jaild skipped for $(TARGET_OS): Linux-only sources (off64_t, seatbelt/seccomp)"
+else
 	$(BUILD_CC) -shared -fPIC -O2 -o $@-jail.so tools/jailshim.c -ldl || echo "[make] jail shim skipped (needs cc -shared + libdl)"
 	$(BUILD_CC) $(CFLAGS) -o $@-jaild tools/jaild.c $(LINK_STRIP) || echo "[make] jaild skipped"
+endif
 	@echo "[make] built $@ ($(VARIANT), TLS=$(TLS), STATIC=$(STATIC), HARDEN=$(HARDEN))"
 
 src/packed_text_data.h: src/packed_text.def src/tool_rows.h src/config.h src/util.h tools/textpack.c
@@ -216,7 +231,7 @@ help:
 	@echo "  make TOOLCHAIN=musl               static musl     -> build/native-musl/clawc"
 	@echo "  make BUILD_TYPE=debug             debug, -O0 -g   -> build/native-debug/clawc"
 	@echo ""
-	@echo "Variables: CROSS TOOLCHAIN=gnu|musl STATIC=0|1 BUILD_TYPE=release|debug"
+	@echo "Variables: CROSS TOOLCHAIN=gnu|musl STATIC=0|1 BUILD_TYPE=release|debug HOSTCC STRIP"
 	@echo "           TLS=0|1 HARDEN=0|1 CHANNELS=\"...\" MINISTRIP=0|1 OUTDIR TARGET"
 	@echo "Verbs:     all test test-asan test-fuzz size clean help"
 	@echo ""

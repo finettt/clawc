@@ -69,21 +69,82 @@ with a compiler that targets iOS (the version in `-target` is the oldest iOS
 the binary has to run on), then fake-sign it, since a jailbreak still only runs
 signed binaries:
 
+First an SDK: jailbreak repositories ship `clang`/`ld64`/`llvm` but **no** SDK, and
+iOS has no `/usr/include`, so `clang` cannot even find `stdio.h` without one. A
+Theos SDK cache (`/var/theos/sdks/iPhoneOS*.sdk`) or any extracted `iPhoneOS.sdk`
+works — pass it with `-isysroot`.
+
+`HOSTCC` must be the **same** iOS-targeted driver: the build-time tools
+(`tools/textpack.c`) run on the machine that builds, which on a device is the
+device itself. Leaving `HOSTCC` at the default `cc` fails at
+`src/packed_text_data.h` with `'stdio.h' file not found`.
+
 ```sh
-make CC="clang -target arm64-apple-ios12.0 -isysroot /path/to/iPhoneOS.sdk -fuse-ld=lld" \
-     TLS=0 STRIP=llvm-strip
+export SDK=/var/theos/sdks/iPhoneOS12.4.sdk     # or /usr/share/SDKs/iPhoneOS.sdk
+export CC_IOS="clang -isysroot $SDK -target arm64-apple-ios12.0"
+
+make HOSTCC="$CC_IOS" CC="$CC_IOS" TLS=0 STRIP=llvm-strip
 ldid -Sentitlements.xml build/native/clawc   # platform-application, com.apple.private.security.no-container
 ```
 
-- `TLS=0` needs `curl` on the device. For built-in TLS add the `-I`/`-L` paths
-  of an OpenSSL built for iOS to `CC` and pass `TLS=1`; a static OpenSSL keeps
-  the binary independent of the bootstrap's libraries.
+`-fuse-ld=lld` is a *cross*-build flag; on-device, Procursus clang linking with
+`ld64` is correct. On a rootless jailbreak every path above gains a `/var/jb`
+prefix.
+
+- `TLS=0` needs `curl` on the device. For built-in TLS, OpenSSL from the
+  bootstrap lives under `/usr/include` and `/usr/lib`, which `-isysroot` hides:
+  pass `-idirafter /usr/include` (not `-I`, which would outrank the SDK) and, in
+  `LDLIBS`, the library paths — `ld64` prefixes `-isysroot` to every `-L`, so
+  `-lssl` is not found and `LDLIBS` from the command line replaces the
+  Makefile's `-lssl -lcrypto`:
+
+  ```sh
+  make HOSTCC="$CC_IOS -idirafter /usr/include" CC="$CC_IOS -idirafter /usr/include" \
+       TLS=1 LDLIBS="/usr/lib/libssl.dylib /usr/lib/libcrypto.dylib"
+  ```
 - iOS ships no PEM trust store: point `SSL_CERT_FILE` at a CA bundle (for
   example curl's `cacert.pem`), otherwise `https://` fails certificate
   verification.
 - iOS has no OS sandbox backend: `"sandbox": "os"` runs the announced
   best-effort fallback (see [setup.md](setup.md)). The jail shim and `jaild`
   are Linux extras, so the two `[make] ... skipped` lines are expected.
+
+## Proxy
+
+Every outbound connection (LLM, Telegram, Matrix, Discord REST + gateway,
+`fetch`) goes through one setting:
+
+```json
+{ "proxy": "socks5h://127.0.0.1:1080", "proxy_no": "127.0.0.1,localhost,.corp" }
+```
+
+Accepted forms: `http://`, `https://` (not implemented yet, rejected with an
+explicit error), `socks5://`, `socks5h://`. Credentials go inline
+(`http://user:pass@host:port`). `socks5h://` resolves DNS at the proxy (no leak);
+`socks5://` uses the domain form too, so the local resolver is never consulted.
+
+Resolution order (later wins, like every other key):
+
+```
+1. proxy key in the config file
+2. CLAWC_PROXY
+3. HTTPS_PROXY / https_proxy
+4. ALL_PROXY   / all_proxy
+```
+
+`proxy_no` / `NO_PROXY` is a comma-separated bypass list of exact hosts,
+`.suffix`es, bare suffixes and `host:port` entries.
+
+TLS is unaffected: the tunnel carries the connection, while SNI and certificate
+verification still target the origin host, so a proxy can never weaken
+verification. `clawc doctor` gains a `[net]` line that opens a real CONNECT
+through the proxy rather than only printing the setting.
+
+**Build without TLS (`TLS=0`)**: https goes through the `curl` subprocess, which
+honours `ALL_PROXY`/`HTTPS_PROXY` itself. The env variables therefore work in
+that build even though `clawc` does not read them — do not be surprised that
+`TLS=1` behaves differently. `clawc` does not pass `--proxy` to curl, so curl's
+own rules (including `NO_PROXY`) apply.
 
 ## Running as a service
 
