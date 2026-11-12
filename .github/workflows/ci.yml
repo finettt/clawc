@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     name: Build and test (GCC, OpenSSL)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
 
   sanitizers:
     name: ASan / UBSan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
 
   fuzz:
     name: JSON parser fuzz
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out
         uses: actions/checkout@v4
