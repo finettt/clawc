@@ -12,7 +12,7 @@ budget even with TLS, streaming, and the multi-gateway daemon. Runs on x86, ARM,
 and RISC-V.
 
 ```
-$ ls -la clawc
+$ ls -la build/native/
 -rwxr-xr-x 1 user user 126984 clawc          # all channels
 -rwxr-xr-x 1 user user  98312 clawc-budget   # make CHANNELS=telegram — under 100 KB
 $ ldd clawc
@@ -77,7 +77,7 @@ time), and loops until the model stops emitting tool calls or `-s max_steps` is 
 ## Building
 
 ```sh
-make            # -> ./clawc (TLS auto-detected)
+make            # -> build/native/clawc (TLS auto-detected)
 make TLS=0      # no OpenSSL: https:// goes through the curl subprocess
 make size       # show binary size
 make test       # end-to-end checks (mock LLM + Telegram + Matrix + Discord)
@@ -90,10 +90,10 @@ running as a systemd service, see **[docs/installation.md](docs/installation.md)
 
 ```sh
 make
-./clawc setup          # interactive config wizard
-./clawc chat           # talk to your agent
-./clawc run "read /etc/os-release and tell me the distro in one line"
-./clawc daemon         # all configured gateways (telegram/serve/heartbeat)
+./build/native/clawc setup          # interactive config wizard
+./build/native/clawc chat           # talk to your agent
+./build/native/clawc run "read /etc/os-release and tell me the distro in one line"
+./build/native/clawc daemon         # all configured gateways (telegram/serve/heartbeat)
 ```
 
 For the wizard, the configuration file & environment, the daemon, the workspace

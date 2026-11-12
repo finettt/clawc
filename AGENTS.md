@@ -71,17 +71,19 @@ Based on the `Makefile` (C99, POSIX libc). Every target except `clean` needs
 the binary built first, so run `make` before the rest.
 
 - Build:    `make` (TLS auto-detected) · `make TLS=0` (no OpenSSL; https via the
-  `curl(1)` subprocess) · `make musl` (fully static) · `make debug`
+  `curl(1)` subprocess) · `make TOOLCHAIN=musl` (fully static) ·
+  `make BUILD_TYPE=debug`
 - Sizes:    `make size`
-- Cross:    `make cross CROSS=aarch64-linux-gnu TLS=1` (also `arm-linux-gnueabihf`,
+- Cross:    `make CROSS=aarch64-linux-gnu TLS=1` (also `arm-linux-gnueabihf`,
   `riscv64-linux-gnu`, `i686-linux-gnu`)
 - Channels: `make CHANNELS="telegram"` / `make CHANNELS="serve"` /
   `make CHANNELS=""` (the agent core is always compiled)
 - Test:     `make test` (full regression via `test/run_python_tests.py`) ·
   `make test-asan` · `make test-fuzz` (JSON mutational fuzzer)
 - Sanitize: `bash test/asan_check.sh` (run `make test` first for the TLS fixtures)
-- Run:      `./clawc run "<msg>"` (one-shot) · `./clawc chat` (REPL) ·
-  `./clawc daemon` (gateways) · `./clawc setup` (wizard) · `./clawc config`
+- Run:      `./build/native/clawc run "<msg>"` (one-shot) ·
+  `./build/native/clawc chat` (REPL) · `./build/native/clawc daemon` (gateways)
+  · `./build/native/clawc setup` (wizard) · `./build/native/clawc config`
 - Clean:    `make clean`
 
 ## Project Overview
@@ -141,8 +143,8 @@ Three layers — channel / brain / body — all under `src/`:
   `/etc/systemd/system` from an agent session (see `deploy/clawc.service`).
 - Do not disable hardening (`HARDEN=0`) or TLS verification to make a test pass.
 - Do not commit the binary, build artifacts, or generated headers — `make clean`
-  handles `./clawc`, `*-static`, `*-debug`, `*.o`, `*.so`, and
-  `src/packed_text_data.h`.
+  removes `$(OUTDIR)/` (`build/*`), `clawc`, `*-static`, `*-debug`, `*.o`, `*.so`,
+  and `src/packed_text_data.h`.
 
 ## Troubleshooting
 - `-Oz` build error on an older compiler: pass `CFLAGS="-Os ..."`.

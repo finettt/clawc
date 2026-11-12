@@ -5,7 +5,7 @@ the daemon, and the workspace layout.
 
 ## The setup wizard
 
-`./clawc setup` launches an interactive wizard that asks for the workspace,
+`./build/native/clawc setup` launches an interactive wizard that asks for the workspace,
 API base/model/key, Telegram token (verified live via `getMe`), allowed chat
 IDs, required Telegram user IDs, serve port, heartbeat interval, and
 auto-approve. It writes `~/.clawc/config` (mode 600, parent directory created

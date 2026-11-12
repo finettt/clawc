@@ -8,13 +8,13 @@ Any C99 compiler + POSIX libc (Linux, macOS, BSD). If OpenSSL headers are
 present, built-in TLS is enabled automatically (`TLS=1`):
 
 ```sh
-make            # -> ./clawc (TLS auto-detected)
-make musl       # fully static ~150KB, 4KB peak RSS (needs musl-gcc)
+make            # -> build/native/clawc (TLS auto-detected)
+make TOOLCHAIN=musl # fully static ~150KB, 4KB peak RSS (needs musl-gcc)
 make TLS=0      # no OpenSSL: https:// goes through the curl subprocess
 make size       # show binary size
 make test       # end-to-end checks (mock LLM + Telegram + Matrix + Discord)
 bash test/asan_check.sh   # ASan/UBSan smoke checks; run make test first (TLS fixtures)
-make debug      # unoptimized debug build
+make BUILD_TYPE=debug # unoptimized debug build -> build/native-debug/clawc
 ```
 
 The Telegram budget build (`make CHANNELS=telegram`) ships under 100 KB; the
@@ -45,16 +45,16 @@ No architecture-specific code exists; any cross toolchain works. Point the
 compiler at your target's OpenSSL or pass `TLS=0`:
 
 ```sh
-make cross CROSS=aarch64-linux-gnu TLS=1     # ARM 64-bit (Pi 3/4/5, Graviton)
-make cross CROSS=arm-linux-gnueabihf TLS=1   # ARM 32-bit (Pi 1/2, embedded)
-make cross CROSS=riscv64-linux-gnu TLS=1     # RISC-V 64 (VisionFive, QEMU, HiFive)
-make cross CROSS=i686-linux-gnu TLS=1        # x86 32-bit
+make CROSS=aarch64-linux-gnu TLS=1   # ARM 64-bit (Pi 3/4/5, Graviton) -> build/aarch64-linux-gnu/clawc
+make CROSS=arm-linux-gnueabihf TLS=1 # ARM 32-bit (Pi 1/2, embedded) -> build/arm-linux-gnueabihf/clawc
+make CROSS=riscv64-linux-gnu TLS=1   # RISC-V 64 (VisionFive, QEMU, HiFive) -> build/riscv64-linux-gnu/clawc
+make CROSS=i686-linux-gnu TLS=1      # x86 32-bit -> build/i686-linux-gnu/clawc
 ```
 
 For a fully static single-file binary (musl; pair with static OpenSSL or `TLS=0`):
 
 ```sh
-make musl       # musl-gcc -> ./clawc-static
+make TOOLCHAIN=musl # musl-gcc -> build/native-musl/clawc (static)
 ```
 
 ## Running as a service
@@ -62,7 +62,7 @@ make musl       # musl-gcc -> ./clawc-static
 `deploy/clawc.service` is a systemd unit with a crash-restart watchdog. Install:
 
 ```sh
-sudo cp clawc /usr/local/bin/
+sudo cp build/native/clawc /usr/local/bin/
 sudo mkdir -p /etc/clawc && sudo cp deploy/clawc.service /etc/systemd/system/
 sudo $EDITOR /etc/clawc/config     # or: CLAWC_CONFIG=/etc/clawc/config clawc setup
 sudo systemctl daemon-reload && sudo systemctl enable --now clawc
