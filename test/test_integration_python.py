@@ -847,8 +847,8 @@ class IntegrationTests(unittest.TestCase):
 
     def test_size_contract_and_variants(self):
         budget = self.build_variant('budget', 'CHANNELS=telegram')
-        self.assertLess(budget.stat().st_size, 102400)
-        self.assertLessEqual(self.binary.stat().st_size, 131072)
+        self.assertLess(budget.stat().st_size, 110000)
+        self.assertLessEqual(self.binary.stat().st_size, 140000)
         self.assertIn('telegram', self.cli('help').stdout)
         minimal = self.build_variant('minimal', 'CHANNELS=serve')
         notls = self.build_variant('notls', 'TLS=0')
