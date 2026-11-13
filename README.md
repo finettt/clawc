@@ -7,14 +7,14 @@ machine, keeps memory in plain Markdown, **remembers every conversation across
 restarts**, streams replies live, asks before doing anything dangerous, calls
 tools (shell, files, skills, web), wakes itself on a timer (heartbeat), speaks
 **HTTPS with built-in TLS**, and lives in **Telegram** as a first-class channel.
-Compiled binary: **98,312 bytes** (Telegram budget build) — under the 100 KB
-budget even with TLS, streaming, and the multi-gateway daemon. Runs on x86, ARM,
+Compiled binary: **≈106.5 KB** (Telegram budget build) — under the 110 KB
+ceiling even with TLS, streaming, and the multi-gateway daemon. Runs on x86, ARM,
 and RISC-V.
 
 ```
 $ ls -la build/native/
--rwxr-xr-x 1 user user 126984 clawc          # all channels
--rwxr-xr-x 1 user user  98312 clawc-budget   # make CHANNELS=telegram — under 100 KB
+-rwxr-xr-x 1 user user 139264 clawc          # all channels (~136 KB)
+-rwxr-xr-x 1 user user 109056 clawc-budget   # make CHANNELS=telegram — under 110 KB
 $ ldd clawc
     libssl.so.3 => ...    # only libc + OpenSSL (TLS=0 build needs just libc)
     libc.so.6 => ...
@@ -31,7 +31,7 @@ line-by-line, and run anywhere a C compiler exists.
 
 | | **clawc** | **OpenClaw** |
 |---|---|---|
-| Stack | C99 + POSIX, one ~96–124 KB binary | TypeScript/Node.js platform, ≈200 MB+ |
+| Stack | C99 + POSIX, one ~106.5–140 KB binary | TypeScript/Node.js platform, ≈200 MB+ |
 | Codebase | 8,971 lines, auditable in an afternoon | ≈ 300–500k+ lines, 70+ deps |
 | Channels | Telegram + TCP bridge + CLI | 20+ (WhatsApp, Slack, Discord, Signal, …) |
 | Safety | inline ✅/❌ confirm on risky actions, audit log, allowlist | host access by default, optional Docker sandbox |
@@ -44,7 +44,8 @@ you can read line-by-line and cross-compile anywhere.
 
 ## Size & startup
 
-Budget build is 98,312 B (`CHANNELS=telegram`); all-channels ~126,984 B;
+Budget build is ≈106.5 KB (`CHANNELS=telegram`); all-channels ~135–140 KB
+depending on toolchain (size ceilings: 110 KB budget / 140 KB all-channels);
 ≈150 KB static musl. Peak RSS ~4 KB static / 2.8 MB dynamic. Startup is ~4 ms
 (budget), almost entirely OpenSSL's one-time constructor init — the `make
 TLS=0` build starts at 1.8 ms. Runtime deps: libc + OpenSSL (TLS=0 build: libc
