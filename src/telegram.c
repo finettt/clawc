@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #define TG_MSG_LIMIT 4096
-#define TG_STREAM_EDIT_MS_MIN 2   /* seconds between message edits */
+#define TG_STREAM_EDIT_MIN_S 2    /* seconds between message edits */
 #define TG_MAX_SESSIONS 64
 #define TG_MAX_PENDING 32
 #define TG_CONFIRM_SECS 120
@@ -52,6 +52,7 @@ typedef struct {
     int status_msg_id;   /* the single working message: placeholder -> reply */
     time_t last_status_edit;
     Buf stream_text;
+    Buf displayed;    /* last text actually sent to Telegram */
     time_t last_edit;
     int edits;
     int ever_streamed;
@@ -502,6 +503,12 @@ static void cb_on_status(void *user, const char *phase) {
     }
 }
 
+static void ctx_snapshot(TgCtx *ctx) {
+    ctx->displayed.len = 0;   /* reuse the already-allocated buffer */
+    ctx->displayed.s[0] = 0;
+    buf_add(&ctx->displayed, ctx->stream_text.s, ctx->stream_text.len);
+}
+
 static void cb_on_delta(void *user, const char *text, size_t n) {
     TgCtx *ctx = user;
     if (ctx->stream_text.len > 4000) return; /* display cap */
@@ -512,12 +519,14 @@ static void cb_on_delta(void *user, const char *text, size_t n) {
         ctx->status_msg_id = tg_send_message(ctx->run, ctx->chat_id, ctx->stream_text.s);
         ctx->last_edit = now;
         ctx->edits++;
+        ctx_snapshot(ctx);
     } else if (ctx->edits == 0 ||
-               (now - ctx->last_edit >= TG_STREAM_EDIT_MS_MIN && ctx->edits < 24)) {
+               (now - ctx->last_edit >= TG_STREAM_EDIT_MIN_S && ctx->edits < 24)) {
         /* first token turns the working message into the reply immediately */
         tg_edit_message(ctx->run, ctx->chat_id, ctx->status_msg_id, ctx->stream_text.s);
         ctx->last_edit = now;
         ctx->edits++;
+        ctx_snapshot(ctx);
     }
 }
 
@@ -733,6 +742,7 @@ static void tg_reply(TgRun *run, Agent *tmpl, long long chat_id, long long sende
     TgCtx ctx;
     memset(&ctx, 0, sizeof ctx);
     buf_init(&ctx.stream_text);
+    buf_init(&ctx.displayed);   /* shown text; freed at end of tg_reply */
     ctx.run = run;
     ctx.chat_id = chat_id;
     ctx.sender_id = sender_id;
@@ -755,7 +765,7 @@ static void tg_reply(TgRun *run, Agent *tmpl, long long chat_id, long long sende
         Buf final;
         buf_init(&final);
         buf_printf(&final, "%.3800s%s", reply.s, reply.len > 3800 ? "\n[...]" : "");
-        if (!ctx.ever_streamed || strcmp(ctx.stream_text.s, reply.s) != 0)
+        if (!ctx.ever_streamed || strcmp(ctx.displayed.s, final.s) != 0)
             tg_edit_message(run, chat_id, ctx.status_msg_id, final.s);
         buf_free(&final);
         if (reply.len > 3800) tg_send_chunked(run, chat_id, reply.s + 3800);
@@ -769,6 +779,7 @@ static void tg_reply(TgRun *run, Agent *tmpl, long long chat_id, long long sende
     a->on_delta = NULL;
     a->confirm = NULL;
     buf_free(&ctx.stream_text);
+    buf_free(&ctx.displayed);
     buf_free(&reply);
 }
 
