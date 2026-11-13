@@ -111,6 +111,12 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn('"tool_call_id"', body)
         self.assertIn('"stream":true', body)
 
+    def test_openai_stream_preserves_first_delta(self):
+        p = self.agent('run', 'stream-test now')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout, 'FINAL: [exit 0]\nhello-from-tool\n')
+        self.assertIn('"stream":true', self.requests())
+
     def test_anthropic_tool_round_trip(self):
         p = self.agent('run', 'skill-test please', flags=('-a', 'anthropic'))
         self.assertEqual(p.returncode, 0, p.stderr)
