@@ -226,6 +226,37 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         return p
 
+    def test_telegram_fast_stream_final_message(self):
+        # The model streams the reply in many fast chunks. Telegram throttles
+        # edits (>=TG_STREAM_EDIT_MIN_S apart, max 24), so mid-stream edits drop
+        # tokens and the visible message lags the full reply. Finalization must
+        # correct that, so the last visible message equals the full reply.
+        env = self.env.copy()
+        env['CLAWC_TELEGRAM_API'] = 'http://127.0.0.1:%d' % self.http.server_port
+        for path in (self.ws / 'history').glob('tg-offset-*'):
+            path.unlink()
+        for path in self.reqdir.glob('req-*.json'):
+            path.unlink()
+        p = self.agent('telegram', '-token', 'STREAMTOKEN', '--once', '-poll', '1', env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        texts = []
+        for req in sorted(self.reqdir.glob('req-*.json'),
+                          key=lambda q: int(re.match(r'req-(\d+)\.json$', q.name).group(1))):
+            body = json.loads(req.read_text())
+            if 'text' in body and 'chat_id' in body:
+                texts.append(body['text'])
+        self.assertTrue(texts, 'no telegram messages sent')
+        # Finalization must correct the throttle lag: the last visible message is
+        # the complete reply, not the strict prefix a throttled edit left behind.
+        self.assertGreater(len(texts), 1, 'expected throttled mid-stream edits')
+        self.assertTrue(texts[-1].endswith('hello-from-tool'),
+                        'final visible message %r is not the complete reply' % (texts[-1],))
+        self.assertIn('[exit 0]', texts[-1])
+        # Prove the throttle actually lagged (an earlier edit is a strict prefix
+        # of the final text) so the regression is not inert.
+        self.assertTrue(any(t != texts[-1] and texts[-1].startswith(t) for t in texts[:-1]),
+                        'no throttled edit lags the final reply; regression is inert')
+
     def reset_offsets(self, pattern='tg-offset-*'):
         for path in (self.ws / 'history').glob(pattern):
             path.unlink()

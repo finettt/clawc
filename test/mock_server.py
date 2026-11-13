@@ -327,8 +327,12 @@ class Handler(BaseHTTPRequestHandler):
         msgs = req.get("messages", [])
         results = tool_results_openai(msgs)
         if results:
+            reply = "FINAL: " + results[0].strip()
+            if req.get("stream") and "stream-test" in first_user_text(msgs):
+                self._send_openai_streamed(reply)
+                return
             self._send({"choices": [{"message": {"role": "assistant",
-                        "content": "FINAL: " + results[0].strip()}}]})
+                        "content": reply}}]})
             return
         ut = first_user_text(msgs)
         if "use-many-tools" in ut and "Learning pass" not in ut:
@@ -371,6 +375,26 @@ class Handler(BaseHTTPRequestHandler):
             blk = {"type": "tool_use", "id": "toolu_1", "name": "run_shell",
                    "input": {"command": "echo hello-from-tool"}}
         self._send({"content": [blk], "stop_reason": "tool_use"})
+
+    def _send_openai_streamed(self, reply):
+        """Split the reply into several SSE chunks so the client's on_delta
+        callback fires many times in quick succession, exercising Telegram's
+        edit throttle (the fast-stream regression path)."""
+        n = len(reply)
+        chunk = max(1, n // 4)
+        parts = [reply[i:i + chunk] for i in range(0, n, chunk)]
+        lines = []
+        for p in parts:
+            lines.append("data: " + json.dumps({"choices": [{"delta": {"content": p}}]}))
+            lines.append("")
+        lines.append("data: [DONE]")
+        lines.append("")
+        body = ("\n".join(lines)).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     # ---- Telegram ----
     def tg_get_updates(self, req, token):
@@ -505,6 +529,11 @@ class Handler(BaseHTTPRequestHandler):
         elif token == "STATUSTOKEN":
             if off == 0:
                 msg(100, "/status", 778)
+            else:
+                self.tg_empty()
+        elif token == "STREAMTOKEN":
+            if off == 0:
+                msg(100, "stream-test now", 42)
             else:
                 self.tg_empty()
         else:  # TESTTOKEN and default
