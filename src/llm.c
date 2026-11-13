@@ -399,8 +399,8 @@ static void stream_handle_line(StreamState *s, const char *line) {
         else if (line[0] == '{') {
             s->mode = 2;
             buf_puts(&s->raw_json, line);
-        }
-        return;
+            return;
+        } else return;
     }
     if (s->mode == 2) {
         buf_puts(&s->raw_json, line);
