@@ -110,7 +110,14 @@ static void child_run(Swarm *s, Job *j, int out) {
     buf_printf(&prompt, "\nMessage from %s in %s:\n%s\n", j->from, j->room, j->text);
     buf_puts(&prompt, packed_text(TXT_019));
     int rc;
-    if (m->peer && m->peer[0]) {
+    int peer = m->peer && m->peer[0];
+#ifdef CLAWC_NO_SERVE
+    if (peer) {
+        fprintf(stderr, "[swarm] %s: peer unavailable in this build, running locally\n", m->id);
+        peer = 0;
+    }
+#endif
+    if (peer) {
         Buf arg; buf_init(&arg); json_append_quoted(&arg, "{\"peer\":", m->peer);
         json_append_quoted(&arg, ",\"task\":", prompt.s);
         buf_puts(&arg, ",\"from\":");
