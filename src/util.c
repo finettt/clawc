@@ -320,12 +320,23 @@ double scan_num(const char **p) {
         while (*s >= '0' && *s <= '9') { f /= 10; v += (*s++ - '0') * f; }
     }
     if (*s == 'e' || *s == 'E') {
-        int en = 0, es = 1;
+        /* Exponent in unsigned long with an early saturation break: a huge
+           exponent (e.g. 1e9999999999999999999999999) must never overflow
+           signed int or spin billions of iterations. */
+        unsigned long en = 0;
+        int es = 1;
         s++;
         if (*s == '+') s++;
         else if (*s == '-') { es = -1; s++; }
-        while (*s >= '0' && *s <= '9') en = en * 10 + (*s++ - '0');
-        while (en-- > 0) v *= (es > 0 ? 10 : 0.1);
+        while (*s >= '0' && *s <= '9') {
+            unsigned long d = (unsigned long)(*s++ - '0');
+            if (en > 100000000UL) en = 100000000UL;
+            en = en * 10 + d;
+        }
+        while (en-- > 0) {
+            v *= (es > 0 ? 10.0 : 0.1);
+            if (v >= 1e308 || v <= 1e-308) break;
+        }
     }
     *p = s;
     return neg ? -v : v;
