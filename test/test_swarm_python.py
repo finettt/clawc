@@ -135,11 +135,20 @@ class SwarmTests(unittest.TestCase):
                 for pattern, ws in [('swarm-*.jsonl', local), ('srv-*.jsonl', remote)]:
                     for p in (ws / 'history').glob(pattern):
                         p.unlink()
-                output = run([binary, '-w', local, '-u', server.api, '-k', 'test',
-                              'swarm', spec], env=env).stdout
+                result = run([binary, '-w', local, '-u', server.api, '-k', 'test',
+                              'swarm', spec], env=env)
+                output = result.stdout
                 self.assertIn('"from":"alice","to":"@bob"', output)
                 self.assertIn('"from":"bob","to":"#team"', output)
                 self.assertIn('"report":"alice received group"', output)
+                warning = "[swarm] bob: peer unavailable in this build, running locally"
+                if binary is self.budget:
+                    # Budget (CLAWC_NO_SERVE) cannot reach a remote peer, so the
+                    # swarm runs the peer member locally instead of over a2a.
+                    self.assertIn(warning, result.stderr)
+                else:
+                    # Full build reaches the remote peer over the bridge.
+                    self.assertNotIn(warning, result.stderr)
 
     def test_100_agents_obey_worker_limit(self):
         server = ModelServer('load')
