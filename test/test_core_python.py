@@ -262,6 +262,57 @@ int main(void) {
     }
     free(out);
     remove(p);
+
+    /* Missing file is a fresh session: success, zero messages. */
+    const char *miss = "hist_wt_missing.jsonl";
+    remove(miss);
+    out = NULL; n = -1;
+    if (hist_load(miss, &out, &n) != 0 || n != 0) {
+        printf("FAIL: missing file n=%d\n", n);
+        return 1;
+    }
+
+    /* Empty existing file: success, zero messages. */
+    const char *empty = "hist_wt_empty.jsonl";
+    FILE *ef = fopen(empty, "wb");
+    if (ef) fclose(ef);
+    out = NULL; n = -1;
+    if (hist_load(empty, &out, &n) != 0 || n != 0) {
+        printf("FAIL: empty file n=%d\n", n);
+        return 1;
+    }
+    remove(empty);
+
+    /* A complete newline-terminated corrupt line must fail the load. */
+    const char *bad = "hist_wt_corrupt.jsonl";
+    FILE *bf = fopen(bad, "wb");
+    fputs("not JSON\n", bf);
+    fclose(bf);
+    out = NULL; n = -1;
+    if (hist_load(bad, &out, &n) == 0) {
+        printf("FAIL: corrupt complete line loaded as success\n");
+        return 1;
+    }
+    remove(bad);
+
+    /* A torn final line (no trailing newline, crash mid-append) is skipped:
+       the valid record before it still loads. */
+    const char *torn = "hist_wt_torn.jsonl";
+    FILE *tf = fopen(torn, "wb");
+    fputs("{\"role\":\"user\",\"content\":\"kept\"}\n{\"role\":\"user\",\"con", tf);
+    fclose(tf);
+    out = NULL; n = -1;
+    if (hist_load(torn, &out, &n) != 0 || n != 1) {
+        printf("FAIL: torn final line n=%d\n", n);
+        return 1;
+    }
+    if (!out[0].content || strcmp(out[0].content, "kept") != 0) {
+        printf("FAIL: torn final line kept wrong content\n");
+        return 1;
+    }
+    free(out);
+    remove(torn);
+
     printf("OK\n");
     return 0;
 }

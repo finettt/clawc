@@ -4,9 +4,12 @@
 
 #include "llm.h"
 
-/* Load messages from a JSONL file. Missing file is not an error (empty).
-   Returns 0 on success. Caller frees *out (array of Msg) after msg_clearing
-   each entry. Corrupt lines are skipped. */
+/* Load messages from a JSONL file. Missing or empty file is not an error
+   (fresh session, 0 messages). Returns 0 on success, -1 if the file exists
+   but is unreadable or a complete (newline-terminated) line fails to parse.
+   A torn final line with no trailing newline (crash mid-append) is skipped
+   with a warning. Caller frees *out (array of Msg) after msg_clearing each
+   entry. */
 int hist_load(const char *path, Msg **out, int *nout);
 
 /* Append one message as a single JSON line (creates file/dir as needed).

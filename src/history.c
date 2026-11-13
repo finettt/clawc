@@ -94,14 +94,34 @@ static int line_to_msg(const char *line, Msg *m) {
     return 0;
 }
 
+/* Free one parsed message without pulling in llm.c: history.c is also linked
+   standalone (with only json.c and util.c) by the history round-trip test. */
+static void free_msg(Msg *m) {
+    int i;
+    free(m->role);
+    free(m->content);
+    free(m->img_path);
+    free(m->tool_call_id);
+    for (i = 0; i < m->ncalls; i++) {
+        free(m->calls[i].id);
+        free(m->calls[i].name);
+        free(m->calls[i].args);
+    }
+    free(m->calls);
+}
+
 int hist_load(const char *path, Msg **out, int *nout) {
     *out = NULL;
     *nout = 0;
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;  /* missing file -> fresh session */
+    if (st.st_size == 0) return 0;       /* empty existing file -> no messages */
     char *data = read_file(path);
-    if (!data) return 0;
+    if (!data) return -1;                /* exists, non-empty, but unreadable */
     int cap = 0;
     Msg *arr = NULL;
     int n = 0;
+    int rc = 0;
     char *line = data;
     while (*line) {
         char *nl = strchr(line, '\n');
@@ -111,19 +131,35 @@ int hist_load(const char *path, Msg **out, int *nout) {
             memcpy(tmp, line, len);
             tmp[len] = 0;
             Msg m;
-            if (line_to_msg(tmp, &m) == 0) {
+            int ok = (line_to_msg(tmp, &m) == 0);
+            free(tmp);
+            if (ok) {
                 if (n + 1 > cap) {
                     cap = cap ? cap * 2 : 16;
                     arr = xrealloc(arr, (size_t)cap * sizeof *arr);
                 }
                 arr[n++] = m;
+            } else if (nl) {
+                /* A complete, newline-terminated line that does not parse is
+                   storage corruption, not a torn append: fail the load. */
+                rc = -1;
+                break;
+            } else {
+                /* Final line with no trailing newline: a crash mid-append can
+                   leave a torn record. Warn and skip it, keep prior messages. */
+                fprintf(stderr, "[history] %s: skipping torn final line\n", path);
             }
-            free(tmp);
         }
         if (!nl) break;
         line = nl + 1;
     }
     free(data);
+    if (rc != 0) {
+        int i;
+        for (i = 0; i < n; i++) free_msg(&arr[i]);
+        free(arr);
+        return -1;
+    }
     *out = arr;
     *nout = n;
     return 0;
