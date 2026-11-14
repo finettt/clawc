@@ -913,7 +913,36 @@ class IntegrationTests(unittest.TestCase):
         cert = Path(self.tmp.name) / 'expired.pem'
         subprocess.run(['openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(key), '-out', str(csr), '-subj', '/CN=localhost'], check=True, capture_output=True)
         ext.write_text('subjectAltName=DNS:localhost,IP:127.0.0.1\n')
-        subprocess.run(['openssl', 'x509', '-req', '-in', str(csr), '-CA', str(self.cert), '-CAkey', str(self.key), '-CAcreateserial', '-not_before', '20190101000000Z', '-not_after', '20200101000000Z', '-extfile', str(ext), '-out', str(cert)], check=True, capture_output=True)
+        # Backdate the certificate so it is already expired. `openssl x509
+        # -not_before/-not_after` only exist in OpenSSL >= 3.3, but CI is Ubuntu
+        # 24.04 with OpenSSL 3.0.13; `openssl ca -startdate/-enddate` works on
+        # both and yields a cert whose notAfter is in the past.
+        index = Path(self.tmp.name) / 'expired-index.txt'
+        index.write_text('')
+        serial = Path(self.tmp.name) / 'expired-serial'
+        serial.write_text('01\n')
+        newcerts = Path(self.tmp.name) / 'expired-cert'
+        newcerts.mkdir()
+        cnf = Path(self.tmp.name) / 'expired-ca.cnf'
+        cnf.write_text(
+            "[ca]\n"
+            "default_ca = ca_default\n\n"
+            "[ca_default]\n"
+            f"certificate = {self.cert}\n"
+            f"private_key = {self.key}\n"
+            f"database = {index}\n"
+            f"serial = {serial}\n"
+            f"new_certs_dir = {newcerts}\n"
+            "default_md = sha256\n"
+            "policy = policy_any\n"
+            "unique_subject = no\n\n"
+            "[policy_any]\n"
+            "commonName = supplied\n"
+        )
+        subprocess.run(['openssl', 'ca', '-config', str(cnf), '-batch',
+                        '-in', str(csr), '-extfile', str(ext),
+                        '-startdate', '20190101000000Z', '-enddate', '20200101000000Z',
+                        '-notext', '-out', str(cert)], check=True, capture_output=True)
         self.assertGreater(cert.stat().st_size, 0)
         env = self.env.copy(); env.update(CLAWC_SERVE_TLS='1', CLAWC_SERVE_CERT=str(cert), CLAWC_SERVE_KEY=str(key))
         port, _, log = self.start_bridge(env=env)
