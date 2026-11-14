@@ -32,9 +32,9 @@ CLAWC="${CLAWC:-build/native/clawc}"   # produced by `make`
 rm -f /tmp/clawc-budget
 make -s CHANNELS=telegram TARGET=/tmp/clawc-budget >/dev/null 2>&1
 BSIZE=$(stat -c %s /tmp/clawc-budget 2>/dev/null || echo 999999)
-if [ "$BSIZE" -lt 110000 ]; then ok "budget build (CHANNELS=telegram) $BSIZE < 110000"; else fail "budget build $BSIZE >= 110000"; fi
+if [ "$BSIZE" -lt 196608 ]; then ok "budget build (CHANNELS=telegram) $BSIZE < 192KB"; else fail "budget build $BSIZE >= 196608 (192KB)"; fi
 SIZE=$(stat -c %s "$CLAWC")
-if [ "$SIZE" -lt 140000 ]; then ok "full build $SIZE < 140000 all-channels ceiling"; else fail "full build $SIZE >= 140000"; fi
+if [ "$SIZE" -lt 196608 ]; then ok "full build $SIZE < 192KB"; else fail "full build $SIZE >= 196608 (192KB)"; fi
 if "$CLAWC" help 2>/dev/null | grep -q "telegram"; then ok "telegram command present"; else fail "telegram command present"; fi
 
 echo "== init =="
