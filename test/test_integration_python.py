@@ -394,7 +394,12 @@ class IntegrationTests(unittest.TestCase):
             try:
                 end = time.monotonic() + 5
                 while time.monotonic() < end:
-                    if any(path.read_text().startswith('s2') for path in (self.ws / 'history').glob('matrix-sync-*')):
+                    # Skip clawc's atomic-write temp cursor (util.c writes
+                    # "<name>.tmp" then renames it); reading it mid-rename races
+                    # and raises FileNotFoundError.
+                    if any(path.read_text().startswith('s2')
+                           for path in (self.ws / 'history').glob('matrix-sync-*')
+                           if not path.name.endswith('.tmp')):
                         break
                     if p.poll() is not None:
                         self.fail('matrix exited before consuming sync')
