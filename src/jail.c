@@ -51,13 +51,15 @@ static const char *jaild_path(char *buf, size_t cap)
     return NULL;
 }
 
-int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap)
+int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap, const char *cwd)
 {
     char path[4600], line[8300], esc[4200];
     const char *helper;
     int rc;
 
-    if (!g_armed) return proc_run(cmd, timeout_s, out, cap);
+    /* Un-supervised fallbacks still honour cwd so a missing helper does not
+       leave the shell running in the wrong place. */
+    if (!g_armed) return proc_run(cmd, timeout_s, out, cap, cwd);
     helper = jaild_path(path, sizeof path);
     if (!helper || access(helper, X_OK) != 0) {
         if (!g_warned) {
@@ -66,7 +68,7 @@ int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap)
                             "unsupervised; shim may be unavailable\n",
                     helper ? helper : "clawc-jaild?");
         }
-        return proc_run(cmd, timeout_s, out, cap);
+        return proc_run(cmd, timeout_s, out, cap, cwd);
     }
     /* single-quote the helper path for sh */
     {
@@ -79,13 +81,18 @@ int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap)
     }
     setenv("CLAWC_JAIL_CMD", cmd, 1);
     setenv("CLAWC_JAIL_ROOTS", g_roots, 1);
+    if (cwd) setenv("CLAWC_JAIL_CWD", cwd, 1); else unsetenv("CLAWC_JAIL_CWD");
     {
         char t[16];
         snprintf(t, sizeof t, "%d", timeout_s > 0 ? timeout_s : 60);
         setenv("CLAWC_JAIL_TIMEOUT", t, 1);
     }
     snprintf(line, sizeof line, "exec '%s'", esc);
-    rc = proc_run(line, (timeout_s > 0 ? timeout_s : 60) + 15, out, cap);
+    /* cwd is carried to the helper via the CLAWC_JAIL_CWD env, not this arg:
+       the helper chdir's its own child (see tools/jaild.c), so the helper
+       process itself inherits the parent cwd here. */
+    rc = proc_run(line, (timeout_s > 0 ? timeout_s : 60) + 15, out, cap, NULL);
     unsetenv("CLAWC_JAIL_CMD");
+    unsetenv("CLAWC_JAIL_CWD");
     return rc;
 }

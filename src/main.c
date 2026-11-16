@@ -131,7 +131,7 @@ static void notify_send(App *app, const char *msg) {
     buf_printf(&b, "%s < '%s'", cmd, tmp);
     Buf out;
     buf_init(&out);
-    proc_run(b.s, 30, &out, 4096);
+    proc_run(b.s, 30, &out, 4096, NULL);
     unlink(tmp);
     buf_free(&b);
     buf_free(&out);

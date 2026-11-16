@@ -400,6 +400,7 @@ int main(void)
 {
     const char *roots = getenv("CLAWC_JAIL_ROOTS");
     const char *cmd = getenv("CLAWC_JAIL_CMD");
+    const char *cwd = getenv("CLAWC_JAIL_CWD");   /* workspace the shell runs in */
     int timeout_s = atoi(getenv("CLAWC_JAIL_TIMEOUT") ? getenv("CLAWC_JAIL_TIMEOUT") : "60");
     struct sock_fprog prog;
     char buf[8192];
@@ -444,6 +445,9 @@ int main(void)
         close(fds[0]);
         close(fds[1]);
         close(lfd);
+        /* Land the supervised shell in the workspace, same loud failure as
+           proc_run(): a missing dir aborts, it never runs elsewhere. */
+        if (cwd && chdir(cwd) != 0) _exit(126);
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
@@ -490,6 +494,7 @@ int main(void)
 shim_only:
     fprintf(stderr, "[jail] syscall supervision unavailable; shim only, not secure containment\n");
     limits(timeout_s);
+    if (cwd && chdir(cwd) != 0) { fprintf(stderr, "[jail] workspace gone\n"); _exit(126); }
     execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
     return 127;
 }

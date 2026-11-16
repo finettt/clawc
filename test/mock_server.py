@@ -104,6 +104,10 @@ def llm_tool_for(ut):
         return "fetch_url", {"url": "http://127.0.0.1:%d/page" % SELF_PORT[0]}
     if "use-listdir" in ut:
         return "list_dir", {}
+    if "use-run-pwd" in ut:
+        return "run_shell", {"command": "pwd"}
+    if "use-run-ls" in ut:
+        return "run_shell", {"command": "ls"}
     if "use-par-subagents" in ut:
         return "subagent", {"tasks": [{"task": "plain pong task", "tools": ["run_shell"]},
                                       {"task": "plain pong task", "tools": ["run_shell"]}]}

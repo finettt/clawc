@@ -190,7 +190,7 @@ int sender_ready(const char *channel, const char *list) {
     return 0;
 }
 
-int proc_run(const char *cmd, int timeout_s, Buf *out, size_t cap) {
+int proc_run(const char *cmd, int timeout_s, Buf *out, size_t cap, const char *cwd) {
     int fds[2];
     if (pipe(fds) != 0) return -1;
     pid_t pid = fork();
@@ -201,6 +201,11 @@ int proc_run(const char *cmd, int timeout_s, Buf *out, size_t cap) {
         dup2(fds[1], 2);
         close(fds[0]);
         close(fds[1]);
+        /* Anchor the child in cwd without touching the parent's cwd: other
+           workers and concurrent tools fork in parallel, so a parent chdir
+           would be racy. A missing workspace is a hard failure, not a silent
+           run in the wrong place. */
+        if (cwd && chdir(cwd) != 0) _exit(126);
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
