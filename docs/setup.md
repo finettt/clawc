@@ -119,3 +119,4 @@ Everything is plain text: edit by hand or let the agent maintain it.
 File tools (`read_file`, `write_file`, `list_dir`) resolve **relative paths
 against the workspace**, so "list my files" works without knowing absolute
 paths; with `-x DIR` everything is confined to the sandbox instead.
+`run_shell` executes each command with **cwd = the workspace root** (absolute paths are unaffected), so relative paths in shell commands resolve exactly like the file tools.

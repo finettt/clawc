@@ -48,10 +48,12 @@ int   str_eq(const char *a, const char *b);
 int   csv_has(const char *list, const char *item); /* exact, non-empty membership */
 int   sender_ready(const char *channel, const char *list);
 
-/* Run cmd through /bin/sh, capture combined stdout+stderr into out (capped).
-   Kills the process after timeout_s seconds. Returns exit code, or -1 on
-   timeout/infra error (out is still filled with whatever was captured). */
-int proc_run(const char *cmd, int timeout_s, Buf *out, size_t cap);
+/* Run cmd through /bin/sh from cwd (chdir'd in the child only), capture
+   combined stdout+stderr into out (capped). Kills the process after
+   timeout_s seconds. cwd is chdir'd in the child before exec; a failure is a
+   loud exit (126), never a silent run in the wrong place. Returns exit code,
+   or -1 on timeout/infra error (out is still filled with what was captured). */
+int proc_run(const char *cmd, int timeout_s, Buf *out, size_t cap, const char *cwd);
 /* Damage limits for subprocesses (jail layer): call in the child before exec. */
 void proc_limits(int timeout_s);
 

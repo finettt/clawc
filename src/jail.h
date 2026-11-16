@@ -10,7 +10,9 @@
 void jail_arm(const char *roots);
 int jail_armed(void);
 
-/* Supervised drop-in for proc_run(): same signature/semantics. */
-int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap);
+/* Supervised drop-in for proc_run(): same signature/semantics. cwd, when set,
+   is propagated into the supervised child so it lands in the same directory
+   the un-supervised path would chdir into. */
+int jail_run(const char *cmd, int timeout_s, Buf *out, size_t cap, const char *cwd);
 
 #endif

@@ -224,8 +224,11 @@ static void tool_run_shell(const ToolsCtx *ctx, const JVal *args, Buf *out) {
     fprintf(stderr, "[tool] run_shell: %s\n", cmd);
     Buf b;
     buf_init(&b);
-    int rc = jail_armed() ? jail_run(cmd, ctx->timeout_s, &b, SHELL_CAP)
-                          : proc_run(cmd, ctx->timeout_s, &b, SHELL_CAP);
+    /* Anchor the shell at the workspace so relative paths match the file
+       tools (safe_path anchors there too). NULL keeps other callers inheriting
+       the process cwd. Absolute paths in the command are unaffected. */
+    int rc = jail_armed() ? jail_run(cmd, ctx->timeout_s, &b, SHELL_CAP, ctx->workspace)
+                          : proc_run(cmd, ctx->timeout_s, &b, SHELL_CAP, ctx->workspace);
     if (b.len == 0) buf_puts(&b, "(no output)");
     if (rc == -1) buf_printf(out, "[timeout or signal]\n%s", b.s);
     else buf_printf(out, "[exit %d]\n%s", rc, b.s);

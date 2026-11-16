@@ -149,6 +149,44 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn('hello web page', p.stdout)
 
+    def test_run_shell_cwd_is_workspace(self):
+        # Regression: run_shell executed with cwd = workspace root, matching
+        # the file tools (safe_path anchors relative paths at the workspace).
+        p = self.agent('run', 'please use-run-pwd now')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        expected = os.path.realpath(str(self.ws))
+        self.assertRegex(p.stdout, r'(?s)FINAL:.*\[exit 0\]\n' + re.escape(expected))
+
+    def test_ls_and_list_dir_agree(self):
+        # ls (run_shell) and list_dir must show the same tree: both resolve a
+        # relative path to the workspace, so their listings agree.
+        (self.ws / 'ws_probe_a.txt').write_text('a')
+        (self.ws / 'ws_probe_b.txt').write_text('b')
+        # Warm up first: the first real run creates history/, which would
+        # otherwise make the two independent runs observe different trees.
+        self.agent('run', 'just do it now')
+        ls_out = self.agent('run', 'please use-run-ls now').stdout
+        list_out = self.agent('run', 'please use-listdir now').stdout
+
+        def entries(out):
+            # The tool result is wrapped as "FINAL: <result>"; the result body
+            # may start on that same line (list_dir) or the next (run_shell),
+            # so strip only the "FINAL: " prefix, never a whole line.
+            got = []
+            for line in out.splitlines():
+                if line.startswith('FINAL: '):
+                    line = line[len('FINAL: '):]
+                line = line.strip()
+                if not line or line.startswith('[exit') or line.startswith('[timeout'):
+                    continue
+                got.append(line)
+            return sorted(got)
+
+        ls_set, list_set = entries(ls_out), entries(list_out)
+        self.assertEqual(ls_set, list_set, 'run_shell ls and list_dir disagree')
+        for probe in ('ws_probe_a.txt', 'ws_probe_b.txt'):
+            self.assertIn(probe, ls_set)
+
     def test_https_round_trip_and_certificate_rejection(self):
         p = self.agent('run', 'tls tool', api=self.tls_api, flags=('--insecure',))
         self.assertEqual(p.returncode, 0, p.stderr)
